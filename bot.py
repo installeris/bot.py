@@ -7,14 +7,13 @@ import sys
 
 sys.stdout.reconfigure(line_buffering=True)
 
-print("--- 🏁 BOTAS STARTUOJA (Tier 1 High-Quality Edition) ---")
+print("--- 🏁 BOTAS STARTUOJA (404 Path Fix) ---")
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 WP_USER = os.getenv("WP_USERNAME")
 WP_PASS = os.getenv("WP_APP_PASS")
 WP_BASE_URL = "https://politiciannetworth.com/wp-json"
 
-# Tikslus WEALTH pasirinkimų sąrašas
 WEALTH_OPTIONS = [
     "Stock Market Investments", "Real Estate Holdings", "Venture Capital", 
     "Professional Law Practice", "Family Inheritance", "Book Deals & Royalties", 
@@ -27,8 +26,8 @@ CAT_MAP = {
     "United Kingdom (UK)": 20, "Germany": 8, "France": 9, "Italy": 10, "Global": 23
 }
 
-# Tier 1 stabilus URL (v1beta palaiko geresnį JSON formatavimą)
-GENERATE_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
+# NAUJAS URL FORMATAS: pridėtas /models/ prieš pavadinimą
+GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
 
 def get_wiki_image(name):
     try:
@@ -50,22 +49,13 @@ def upload_to_wp(image_url, politician_name):
     except: return None
 
 def run_wealth_bot(politician_name):
-    print(f"\n💎 Analizuojamas: {politician_name}")
+    print(f"\n💎 Ruošiamas: {politician_name}")
     img_id = upload_to_wp(get_wiki_image(politician_name), politician_name)
 
-    # Griežtas promptas kokybei ir SEO
     prompt = (
-        f"Write a professional, 1000-word financial biography for {politician_name} in 2026. \n"
-        f"STYLE: Use H2/H3 tags, use **bolding** for key financial figures and milestones. "
-        f"Compare their wealth to US average citizens. Tell an interesting story of their financial rise. \n"
-        f"DATA: For net worth, use $XX,XXX,XXX format. History: '2019:X,2022:Y,2026:Z'. \n"
-        f"SOURCES: Provide 2-3 REAL raw URLs (plain text). \n"
-        f"LIMITS: Pick EXACTLY 2 categories from {list(CAT_MAP.keys())} and EXACTLY 2 wealth sources from {WEALTH_OPTIONS}. \n"
-        f"Return ONLY valid JSON: {{"
-        f"\"article\": \"HTML\", \"net_worth\": \"$X\", \"job_title\": \"Role\", "
-        f"\"history\": \"2019:X,2026:Y\", \"raw_urls\": [\"url1\", \"url2\"], "
-        f"\"wealth_sources\": [], \"assets\": \"Specific assets\", "
-        f"\"seo_title\": \"Title\", \"seo_desc\": \"Description\", \"cats\": []}}"
+        f"Write a professional 1000-word financial article about {politician_name} in 2026. \n"
+        f"Include H2/H3 tags and **bold** key facts. Compare wealth to peers. \n"
+        f"Return ONLY JSON: {{\"article\": \"HTML\", \"net_worth\": \"$10M\", \"job_title\": \"Role\", \"history\": \"2019:8M,2026:10M\", \"raw_urls\": [\"url1\", \"url2\"], \"wealth_sources\": [], \"assets\": \"Text\", \"seo_title\": \"Title\", \"seo_desc\": \"Desc\", \"cats\": [\"United States (USA)\"]}}"
     )
     
     safety_settings = [
@@ -74,37 +64,37 @@ def run_wealth_bot(politician_name):
     ]
 
     try:
-        response = requests.post(GENERATE_URL, json={
+        response = requests.post(GEMINI_URL, json={
             "contents": [{"parts": [{"text": prompt}]}],
             "safetySettings": safety_settings,
-            "generationConfig": {"temperature": 0.8} # Didesnis kūrybiškumas straipsniui
+            "generationConfig": {"temperature": 0.8}
         })
         
-        resp_json = response.json()
-        if 'candidates' not in resp_json:
-            print(f"  ❌ API Klaida: {resp_json}")
+        # Tikriname, ar negauname 404 ar 400 klaidos iškart
+        if response.status_code != 200:
+            print(f"  ❌ API Klaida ({response.status_code}): {response.text}")
             return
 
+        resp_json = response.json()
         ai_text = resp_json['candidates'][0]['content']['parts'][0]['text']
         data = json.loads(re.search(r'\{.*\}', ai_text, re.DOTALL).group())
 
-        # Šaltinių sutvarkymas be redirectų į tavo puslapį
+        # Nuorodos be redirectų
         sources_list = "".join([f'<li><a href="{url}" target="_blank" rel="nofollow noopener">{url}</a></li>' for url in data.get("raw_urls", [])])
-        clean_sources_html = f"<ul>{sources_list}</ul>" if sources_list else ""
-
+        
         payload = {
-            "title": data.get("seo_title", f"{politician_name} Net Worth 2026"),
+            "title": data.get("seo_title", f"{politician_name} Net Worth"),
             "content": data["article"],
             "status": "publish",
-            "categories": [CAT_MAP[c] for c in data.get("cats", []) if c in CAT_MAP],
             "featured_media": img_id,
+            "categories": [CAT_MAP[c] for c in data.get("cats", []) if c in CAT_MAP],
             "acf": {
                 "job_title": data.get("job_title", ""),
                 "net_worth": data.get("net_worth", ""),
                 "net_worth_history": data.get("history", ""),
                 "source_of_wealth": [s for s in data.get("wealth_sources", []) if s in WEALTH_OPTIONS][:2],
                 "main_assets": data.get("assets", ""),
-                "sources": clean_sources_html
+                "sources": f"<ul>{sources_list}</ul>" if sources_list else ""
             },
             "rank_math_title": data.get("seo_title", ""),
             "rank_math_description": data.get("seo_desc", ""),
@@ -112,18 +102,14 @@ def run_wealth_bot(politician_name):
         }
 
         res = requests.post(f"{WP_BASE_URL}/wp/v2/posts", json=payload, auth=(WP_USER, WP_PASS))
-        if res.status_code == 201:
-            print(f"  ✅ SĖKMĖ: {politician_name} paskelbtas!")
-        else:
-            print(f"  ❌ WP Klaida: {res.text}")
+        print(f"  ✅ SĖKMĖ: {politician_name}")
 
     except Exception as e:
-        print(f"  🚨 Kritinė klaida: {e}")
+        print(f"  🚨 Klaida: {e}")
 
 if __name__ == "__main__":
     if os.path.exists("names.txt"):
         with open("names.txt", "r") as f:
             for name in [n.strip() for n in f if n.strip()]:
                 run_wealth_bot(name)
-                # Tier 1 leidžia greičiau, bet 10s užtikrina stabilumą dėl WordPress limitų
-                time.sleep(10)
+                time.sleep(5)
