@@ -8,12 +8,16 @@ jobs:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
         with:
-          python-version: '3.11' # ČIA PAKEISK Į 3.11
-      - run: pip install requests google-genai
-      - env:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install requests google-genai
+      - name: Run bot
+        env:
+          PYTHONUNBUFFERED: "1" # Svarbu: rodo tekstą gyvai
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           WP_USERNAME: ${{ secrets.WP_USERNAME }}
           WP_APP_PASS: ${{ secrets.WP_APP_PASS }}
-       run: |
-          ls -R # Ši eilutė parodys mums visus failus, jei vėl užstrigs
+        run: |
+          echo "📂 Tikriname failų vietą:"
+          ls -R
           python bot.py
