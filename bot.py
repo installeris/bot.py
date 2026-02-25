@@ -5,21 +5,24 @@ import re
 import time
 import sys
 
+# Priverčiame logus rodytis GitHub Actions realiu laiku
 sys.stdout.reconfigure(line_buffering=True)
 
-print("--- 🏁 BOTAS STARTUOJA (Stability & RankMath Fix) ---")
+print("--- 🏁 BOTAS STARTUOJA (Stabilizuota versija: 70s pauzė) ---")
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 WP_USER = os.getenv("WP_USERNAME")
 WP_PASS = os.getenv("WP_APP_PASS")
 WP_BASE_URL = "https://politiciannetworth.com/wp-json"
 
+# Tikslus Checkbox sąrašas tavo svetainei
 WEALTH_OPTIONS = [
     "Stock Market Investments", "Real Estate Holdings", "Venture Capital", 
     "Professional Law Practice", "Family Inheritance", "Book Deals & Royalties", 
     "Corporate Board Seats", "Consulting Fees", "Hedge Fund Interests", "Cryptocurrency Assets"
 ]
 
+# Kategorijų žemėlapis (ID iš tavo svetainės)
 CAT_MAP = {
     "US Senate": 1, "US House of Representatives": 2, "Executive Branch": 3,
     "State Governors": 4, "European Parliament": 18, "United States (USA)": 19,
@@ -63,19 +66,20 @@ def run_wealth_bot(politician_name):
     img_id = upload_to_wp(get_wiki_image(politician_name), politician_name)
 
     prompt = (
-        f"Research {politician_name} for a net worth article. \n"
-        f"1. WEALTH: Use financial disclosures. If data is old, calculate 2026 value with 8% annual growth. Be realistic. \n"
-        f"2. SOURCES: Return 2-3 real URLs as HTML links. \n"
-        f"3. SEO: Title and Meta Description for Rank Math. \n"
+        f"Research {politician_name} for a net worth article set in 2026. \n"
+        f"1. WEALTH LOGIC: Use recent disclosures. If data is old (e.g. 2018), apply a ~7-10% annual growth rate to estimate the 2026 value. Ensure the value is realistic for 2026. \n"
+        f"2. SOURCES: Find 2-3 real external URLs (OpenSecrets, Forbes, Official Disclosures) and return them as clickable HTML links. \n"
+        f"3. SEO: Create a focus-keyword rich Title and Meta Description for Rank Math. \n"
+        f"4. CATEGORIES: You must select 'United States (USA)' and the appropriate subcategory (e.g. 'US Senate'). \n"
         f"Return ONLY valid JSON: {{"
-        f"\"article\": \"HTML content\", \"net_worth\": \"$15M\", \"job_title\": \"Role\", "
-        f"\"history\": \"2019:8M,2020:9M...\", \"sources_html\": \"HTML links\", "
-        f"\"source_of_wealth\": [], \"key_assets\": \"Asset names\", "
+        f"\"article\": \"HTML\", \"net_worth\": \"$15,500,000\", \"job_title\": \"Role\", "
+        f"\"history\": \"2019:8000000,2020:8800000...\", \"sources_html\": \"HTML links\", "
+        f"\"source_of_wealth\": [], \"key_assets\": \"1-2 main assets\", "
         f"\"seo_title\": \"Title\", \"seo_desc\": \"Description\", \"cats\": [\"United States (USA)\", \"US Senate\"]}}"
     )
     
     try:
-        # Pridėti saugos nustatymai, kad API neblokuotų užklausos
+        # Saugos nustatymai, kad API neblokuotų užklausų apie turtą
         safety_settings = [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
             {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
@@ -90,9 +94,8 @@ def run_wealth_bot(politician_name):
         
         resp_json = response.json()
         
-        # Patikra ar 'candidates' egzistuoja
         if 'candidates' not in resp_json:
-            print(f"  ❌ API Klaida (Nėra kandidatų): {resp_json.get('error', {}).get('message', 'Blokuota saugos filtrų')}")
+            print(f"  ❌ API Klaida: {resp_json.get('error', {}).get('message', 'Blocked or Quota Exceeded')}")
             return
 
         ai_text = resp_json['candidates'][0]['content']['parts'][0]['text']
@@ -115,23 +118,32 @@ def run_wealth_bot(politician_name):
                 "main_assets": data.get("key_assets", ""),
                 "sources": data.get("sources_html", "")
             },
+            # Rank Math API Manager palaikymas
             "rank_math_title": data.get("seo_title", ""),
             "rank_math_description": data.get("seo_desc", ""),
             "rank_math_focus_keyword": f"{politician_name} net worth"
         }
 
         res = requests.post(f"{WP_BASE_URL}/wp/v2/posts", json=payload, auth=(WP_USER, WP_PASS))
+        
         if res.status_code == 201:
-            print(f"  ✅ SĖKMĖ: {politician_name} paskelbtas!")
+            print(f"  ✅ SĖKMĖ: {politician_name} publikuotas!")
         else:
             print(f"  ❌ WP Klaida: {res.text}")
 
     except Exception as e:
-        print(f"  🚨 Kritinė klaida: {e}")
+        print(f"  🚨 Klaida vykdant užduotį: {e}")
 
 if __name__ == "__main__":
     if os.path.exists("names.txt"):
         with open("names.txt", "r") as f:
-            for name in [n.strip() for n in f if n.strip()]:
-                run_wealth_bot(name)
-                time.sleep(30)
+            names = [n.strip() for n in f if n.strip()]
+        
+        print(f"📚 Iš viso rasta vardų: {len(names)}")
+        for i, name in enumerate(names, 1):
+            run_wealth_bot(name)
+            if i < len(names):
+                print(f"⏳ Laukiama 70 sek. (Saugome Gemini kvotą {i}/{len(names)})...")
+                time.sleep(70)
+    else:
+        print("🚨 Klaida: names.txt nerastas!")
