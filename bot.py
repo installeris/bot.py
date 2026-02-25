@@ -22,7 +22,7 @@ if not all([GEMINI_KEY, WP_USER, WP_PASS]):
     sys.exit(1)
 
 # Konfigūruojame Gemini
-genai.configure(api_key=GEMINI_KEY)
+genai.configure(api_key=GEMINI_KEY, transport='rest')
 model = genai.GenerativeModel('gemini-1.5-flash-8b')
 
 CAT_MAP = {
