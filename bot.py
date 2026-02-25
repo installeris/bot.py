@@ -5,18 +5,15 @@ import re
 import time
 import sys
 
-# Priverčiame tekstą GitHub lange pasirodyti akimirksniu
 sys.stdout.reconfigure(line_buffering=True)
 
-print("--- 🏁 BOTAS STARTUOJA (Galutinė versija: Checkbox & SEO Fix) ---")
+print("--- 🏁 BOTAS STARTUOJA (Chart, Image & NetWorth Fix) ---")
 
-# 1. KONFIGŪRACIJA
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 WP_USER = os.getenv("WP_USERNAME")
 WP_PASS = os.getenv("WP_APP_PASS")
 WP_BASE_URL = "https://politiciannetworth.com/wp-json"
 
-# Tikslus Checkbox sąrašas iš tavo ACF nustatymų
 WEALTH_OPTIONS = [
     "Stock Market Investments", "Real Estate Holdings", "Venture Capital", 
     "Professional Law Practice", "Family Inheritance", "Book Deals & Royalties", 
@@ -29,7 +26,6 @@ CAT_MAP = {
     "United Kingdom (UK)": 20, "Germany": 8, "France": 9, "Italy": 10, "Global": 23
 }
 
-# --- API MODELIO PAIEŠKA ---
 def get_working_model():
     url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_KEY}"
     try:
@@ -41,28 +37,25 @@ def get_working_model():
     except: return None
 
 ACTIVE_MODEL = get_working_model()
-if not ACTIVE_MODEL:
-    print("🚨 KLAIDA: Nepavyko rasti Gemini modelio. Patikrink API raktą.")
-    sys.exit(1)
-
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/{ACTIVE_MODEL}:generateContent?key={GEMINI_KEY}"
 
-# --- PAGALBINĖS FUNKCIJOS ---
 def get_wiki_image(name):
     try:
-        headers = {'User-Agent': 'WealthBot/1.0 (contact@politiciannetworth.com)'}
-        url = f"https://en.wikipedia.org/w/api.php?action=query&titles={name}&prop=pageimages&format=json&pithumbsize=1200"
-        res = requests.get(url, headers=headers).json()
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        # Ieškome per Wikipedia paiešką, kad gautume tiksliausią puslapį
+        search_url = f"https://en.wikipedia.org/w/api.php?action=query&format=json&prop=pageimages|images&titles={name}&pithumbsize=1000"
+        res = requests.get(search_url, headers=headers).json()
         pages = res.get("query", {}).get("pages", {})
         for pg in pages:
-            if "thumbnail" in pages[pg]: return pages[pg]["thumbnail"]["source"]
+            if "thumbnail" in pages[pg]:
+                return pages[pg]["thumbnail"]["source"]
     except: return None
     return None
 
 def upload_to_wp(image_url, politician_name):
     if not image_url: return None
     try:
-        img_res = requests.get(image_url, stream=True, timeout=10)
+        img_res = requests.get(image_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=15)
         if img_res.status_code == 200:
             headers = {
                 "Content-Disposition": f"attachment; filename={politician_name.replace(' ', '_')}.jpg",
@@ -71,52 +64,36 @@ def upload_to_wp(image_url, politician_name):
             res = requests.post(f"{WP_BASE_URL}/wp/v2/media", data=img_res.content, headers=headers, auth=(WP_USER, WP_PASS))
             if res.status_code == 201:
                 return res.json()["id"]
-    except Exception as e:
-        print(f"  ⚠️ Klaida keliant nuotrauką: {e}")
+    except: return None
     return None
 
-# --- PAGRINDINĖ BOT LOGIKA ---
 def run_wealth_bot(politician_name):
     print(f"\n💎 Ruošiamas: {politician_name}")
     
-    # 1. Nuotrauka
     wiki_img = get_wiki_image(politician_name)
     img_id = upload_to_wp(wiki_img, politician_name)
     if img_id: print(f"  📸 Nuotrauka įkelta (ID: {img_id})")
+    else: print("  ⚠️ Nuotraukos rasti nepavyko.")
 
-    # 2. AI turinio generavimas
     prompt = (
-        f"Research {politician_name}. Write an 800-word professional article in English about their net worth. \n"
-        f"1. Net worth: Must be a realistic estimate (e.g. '$15.5 Million'). \n"
-        f"2. Source of Wealth: You MUST pick 1-3 items ONLY from this list: {WEALTH_OPTIONS}. \n"
-        f"3. Return ONLY JSON: {{"
-        f"\"article\": \"HTML content with H2, H3 tags\", "
-        f"\"net_worth\": \"Short value\", \"job_title\": \"Current role\", "
-        f"\"source_of_wealth\": [], \"key_assets\": \"1-2 main assets\", "
-        f"\"seo_title\": \"SEO optimized title\", \"seo_desc\": \"Meta description\", "
-        f"\"cats\": [\"United States (USA)\", \"US Senate\"]}}"
+        f"Research {politician_name}. Write an 800-word SEO article in English about their net worth. \n"
+        f"1. Net worth: Give a clear estimate, e.g., '$14,500,000'. Do not use short versions like $2.3. \n"
+        f"2. Chart data: Generate wealth history from 2019 to 2026. Format EXACTLY like this: 2019:1000000,2020:1200000,2021:1500000... \n"
+        f"3. Source of Wealth: Pick from: {WEALTH_OPTIONS}. \n"
+        f"4. Return ONLY JSON: {{"
+        f"\"article\": \"HTML content\", \"net_worth\": \"$15,000,000\", \"job_title\": \"Official Role\", "
+        f"\"chart\": \"2019:164000000,2020:175000000...\", \"source_of_wealth\": [], \"key_assets\": \"Specific assets\", "
+        f"\"seo_title\": \"SEO Title\", \"seo_desc\": \"Meta Description\", \"cats\": [\"United States (USA)\"]}}"
     )
     
     try:
         response = requests.post(GEMINI_URL, json={"contents": [{"parts": [{"text": prompt}]}]})
         ai_text = response.json()['candidates'][0]['content']['parts'][0]['text']
-        
-        # JSON išvalymas
-        match = re.search(r'\{.*\}', ai_text, re.DOTALL)
-        if not match:
-            print("  ❌ Klaida: AI nepateikė JSON.")
-            return
-        data = json.loads(match.group())
+        data = json.loads(re.search(r'\{.*\}', ai_text, re.DOTALL).group())
 
-        # Validuojame Source of Wealth (tik tai, ką WP priima)
         valid_sources = [s for s in data.get("source_of_wealth", []) if s in WEALTH_OPTIONS]
-        if not valid_sources: valid_sources = ["Stock Market Investments"]
-
-        # Kategorijų ID
         cat_ids = [CAT_MAP[c] for c in data.get("cats", []) if c in CAT_MAP]
-        if not cat_ids: cat_ids = [23]
 
-        # 3. Siuntimas į WordPress
         payload = {
             "title": f"{politician_name} Net Worth",
             "content": data["article"],
@@ -126,6 +103,7 @@ def run_wealth_bot(politician_name):
             "acf": {
                 "job_title": data.get("job_title", ""),
                 "net_worth": data.get("net_worth", ""),
+                "wealth_chart": data.get("chart", ""), # Pataisyk 'wealth_chart' į savo tikrą ACF ID
                 "source_of_wealth": valid_sources,
                 "main_assets": data.get("key_assets", ""),
             },
@@ -139,24 +117,16 @@ def run_wealth_bot(politician_name):
         res = requests.post(f"{WP_BASE_URL}/wp/v2/posts", json=payload, auth=(WP_USER, WP_PASS))
         
         if res.status_code == 201:
-            print(f"  ✅ SĖKMĖ: {politician_name} sėkmingai publikuotas!")
+            print(f"  ✅ SĖKMĖ: {politician_name} publikuotas!")
         else:
             print(f"  ❌ WP Klaida: {res.text}")
 
     except Exception as e:
-        print(f"  🚨 Klaida vykdant užduotį: {e}")
+        print(f"  🚨 Klaida: {e}")
 
-# --- PALEIDIMAS ---
 if __name__ == "__main__":
     if os.path.exists("names.txt"):
         with open("names.txt", "r") as f:
-            names = [n.strip() for n in f if n.strip()]
-        
-        print(f"📚 Rasta vardų: {len(names)}")
-        for i, name in enumerate(names, 1):
-            run_wealth_bot(name)
-            if i < len(names):
-                print(f"⏳ Miegame 30 sek...")
+            for name in [n.strip() for n in f if n.strip()]:
+                run_wealth_bot(name)
                 time.sleep(30)
-    else:
-        print("🚨 KLAIDA: names.txt failas nerastas!")
