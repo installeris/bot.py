@@ -5,131 +5,89 @@ import re
 import time
 import sys
 
-# Priverčiame tekstą GitHub lange pasirodyti akimirksniu (be buferio)
 sys.stdout.reconfigure(line_buffering=True)
 
-print("--- 🏁 BOTAS STARTUOJA (Direct v1beta Metodas) ---")
+print("--- 🏁 BOTAS STARTUOJA (Auto-Model Detection) ---")
 
-# 1. KONFIGŪRACIJA IŠ GITHUB SECRETS
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 WP_USER = os.getenv("WP_USERNAME")
 WP_PASS = os.getenv("WP_APP_PASS")
 WP_BASE_URL = "https://politiciannetworth.com/wp-json"
 
-# Naudojame v1beta, nes v1 tavo regione meta 404
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
-
-# PATIKRA
 if not all([GEMINI_KEY, WP_USER, WP_PASS]):
-    print("🚨 KLAIDA: Trūksta GitHub Secrets (GEMINI_API_KEY, WP_USERNAME arba WP_APP_PASS)!")
+    print("🚨 KLAIDA: Trūksta GitHub Secrets!")
     sys.exit(1)
 
-CAT_MAP = {
-    "US Senate": 1, "US House of Representatives": 2, "Executive Branch": 3,
-    "State Governors": 4, "European Parliament": 18, "United States (USA)": 19,
-    "United Kingdom (UK)": 20, "Germany": 8, "France": 9, "Italy": 10, "Global": 23
-}
+def get_working_model():
+    """Patikrina, kokį modelį tavo raktas leidžia naudoti."""
+    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_KEY}"
+    try:
+        res = requests.get(url).json()
+        models = [m['name'] for m in res.get('models', []) if 'generateContent' in m.get('supportedGenerationMethods', [])]
+        # Prioritetas Flash modeliams
+        for m in models:
+            if "gemini-1.5-flash" in m: return m
+        return models[0] if models else None
+    except: return None
 
+# Surandame tikslų modelio pavadinimą tavo raktui
+ACTIVE_MODEL = get_working_model()
+if ACTIVE_MODEL:
+    print(f"✅ Naudosime modelį: {ACTIVE_MODEL}")
+    GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/{ACTIVE_MODEL}:generateContent?key={GEMINI_KEY}"
+else:
+    print("🚨 KLAIDA: Nepavyko rasti jokio veikiančio modelio tavo raktui!")
+    sys.exit(1)
+
+# --- STANDARTINĖS FUNKCIJOS ---
 def get_wiki_image(name):
     try:
-        params = {"action": "query", "titles": name, "prop": "pageimages", "format": "json", "pithumbsize": 1000}
-        res = requests.get("https://en.wikipedia.org/w/api.php", params=params).json()
+        res = requests.get(f"https://en.wikipedia.org/w/api.php?action=query&titles={name}&prop=pageimages&format=json&pithumbsize=1000").json()
         pages = res.get("query", {}).get("pages", {})
         for pg in pages:
             if "thumbnail" in pages[pg]: return pages[pg]["thumbnail"]["source"]
     except: return None
-    return None
 
 def upload_to_wp(image_url, politician_name):
     try:
         img_data = requests.get(image_url).content
-        headers = {
-            "Content-Disposition": f"attachment; filename={politician_name.replace(' ', '_')}.jpg",
-            "Content-Type": "image/jpeg"
-        }
-        res = requests.post(f"{WP_BASE_URL}/wp/v2/media", data=img_data, headers=headers, auth=(WP_USER, WP_PASS))
-        if res.status_code == 201: return res.json()["id"]
+        res = requests.post(f"{WP_BASE_URL}/wp/v2/media", data=img_data, 
+                            headers={"Content-Disposition": f"attachment; filename={politician_name.replace(' ', '_')}.jpg", "Content-Type": "image/jpeg"},
+                            auth=(WP_USER, WP_PASS))
+        return res.json()["id"] if res.status_code == 201 else None
     except: return None
-    return None
-
-def ask_gemini(prompt):
-    headers = {'Content-Type': 'application/json'}
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}]
-    }
-    response = requests.post(GEMINI_URL, headers=headers, json=payload)
-    if response.status_code == 200:
-        return response.json()['candidates'][0]['content']['parts'][0]['text']
-    else:
-        raise Exception(f"Gemini API klaida: {response.status_code} - {response.text}")
 
 def run_wealth_bot(politician_name):
-    print(f"\n💎 Ruošiamas politikas: {politician_name}")
-    
-    img_url = get_wiki_image(politician_name)
-    img_id = upload_to_wp(img_url, politician_name) if img_url else None
-    if img_id: print(f"  📸 Nuotrauka sėkmingai įkelta (ID: {img_id})")
+    print(f"\n💎 Dirbame su: {politician_name}")
+    img_id = upload_to_wp(get_wiki_image(politician_name), politician_name)
 
-    # Griežtas SEO promptas
-    prompt = (
-        f"Research {politician_name}. Write a 600-word SEO article in English about their net worth. "
-        f"Use HTML tags like H2 and H3. Category: Politician Wealth. "
-        f"Return ONLY a valid JSON object: "
-        f"{{\"article\": \"...\", \"net_worth\": \"...\", \"job_title\": \"...\", \"main_assets\": \"...\", \"wealth_sources\": [], \"history\": \"...\", \"seo_title\": \"...\", \"seo_desc\": \"...\", \"cats\": []}}"
-    )
+    prompt = (f"Research {politician_name}. Write a 600-word SEO article in English about their net worth. "
+              f"Return ONLY a valid JSON object: {{\"article\": \"...\", \"net_worth\": \"...\", \"job_title\": \"...\", \"cats\": []}}")
     
     try:
-        print("  🧠 AI generuoja turinį...")
-        ai_response = ask_gemini(prompt)
-        
-        # Išvalome JSON nuo galimų AI šiukšlių (pvz. ```json ...)
-        clean_text = re.search(r'\{.*\}', ai_response, re.DOTALL)
-        if not clean_text:
-            print("  ❌ Klaida: AI nepateikė teisingo JSON formato.")
+        response = requests.post(GEMINI_URL, json={"contents": [{"parts": [{"text": prompt}]}]})
+        if response.status_code != 200:
+            print(f"  ❌ API Klaida: {response.status_code}")
             return
-            
-        data = json.loads(clean_text.group())
-        
-        # Kategorijų parinkimas
-        target_cats = [CAT_MAP[c] for c in data.get("cats", []) if c in CAT_MAP] or [23]
 
-        # WordPress duomenų paketas
+        ai_text = response.json()['candidates'][0]['content']['parts'][0]['text']
+        data = json.loads(re.search(r'\{.*\}', ai_text, re.DOTALL).group())
+
         payload = {
             "title": f"{politician_name} Net Worth",
             "content": data["article"],
             "status": "publish",
-            "categories": target_cats,
             "featured_media": img_id,
-            "acf": {
-                "job_title": data.get("job_title", ""),
-                "net_worth": data.get("net_worth", ""),
-                "source_of_wealth": str(data.get("wealth_sources", "")),
-                "main_assets": data.get("main_assets", ""),
-                "net_worth_history": data.get("history", "")
-            }
+            "acf": {"net_worth": data.get("net_worth", ""), "job_title": data.get("job_title", "")}
         }
 
-        print("  ✉️ Siunčiame į WordPress...")
         res = requests.post(f"{WP_BASE_URL}/wp/v2/posts", json=payload, auth=(WP_USER, WP_PASS))
-        
-        if res.status_code == 201:
-            print(f"  ✅ SĖKMĖ: {politician_name} sėkmingai publikuotas!")
-        else:
-            print(f"  ❌ WordPress klaida {res.status_code}: {res.text}")
-            
-    except Exception as e:
-        print(f"  🚨 Klaida: {e}")
+        print(f"  ✅ PUBLIKUOTA!" if res.status_code == 201 else f"  ❌ WP Klaida: {res.text}")
+    except Exception as e: print(f"  🚨 Klaida: {e}")
 
 if __name__ == "__main__":
     if os.path.exists("names.txt"):
         with open("names.txt", "r") as f:
-            names = [l.strip() for l in f if l.strip()]
-        
-        print(f"📚 Sąraše rasta vardų: {len(names)}")
-        for i, name in enumerate(names, 1):
-            run_wealth_bot(name)
-            if i < len(names):
-                print(f"⏳ Miegame 30 sek. (testinė pertrauka)...")
-                time.sleep(30)
-    else:
-        print("🚨 KLAIDA: names.txt failas nerastas!")
+            for name in [n.strip() for n in f if n.strip()]:
+                run_wealth_bot(name)
+                time.sleep(10)
