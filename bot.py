@@ -1,34 +1,29 @@
 import os
 import requests
-from google import genai
+import google.generativeai as genai
 import json
 import re
 import time
 import sys
 
-# Priverčiame tekstą GitHub lange pasirodyti akimirksniu
+# Priverčiame tekstą pasirodyti GitHub lange iškart
 sys.stdout.reconfigure(line_buffering=True)
 
-print("--- 🏁 BOTAS STARTUOJA (Pataisytas Modelis) ---")
+print("--- 🏁 BOTAS STARTUOJA (Stable Version) ---")
 
-# 1. KONFIGŪRACIJA IŠ GITHUB SECRETS
+# 1. KONFIGŪRACIJA
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 WP_USER = os.getenv("WP_USERNAME")
 WP_PASS = os.getenv("WP_APP_PASS")
 WP_BASE_URL = "https://politiciannetworth.com/wp-json"
 
-# 2. PATIKRA
 if not all([GEMINI_KEY, WP_USER, WP_PASS]):
     print("🚨 KLAIDA: Trūksta GitHub Secrets!")
     sys.exit(1)
 
-# Sukuriame klientą (standartinė konfigūracija dažniausiai veikia geriausiai)
-try:
-    client = genai.Client(api_key=GEMINI_KEY)
-    print("✅ Prisijungta prie Gemini API.")
-except Exception as e:
-    print(f"❌ Gemini kliento klaida: {e}")
-    sys.exit(1)
+# Konfigūruojame Gemini
+genai.configure(api_key=GEMINI_KEY)
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 CAT_MAP = {
     "US Senate": 1, "US House of Representatives": 2, "Executive Branch": 3,
@@ -67,17 +62,14 @@ def run_wealth_bot(politician_name):
     prompt = (
         f"Research {politician_name}. Write a 600-word SEO article in English about their net worth. "
         f"Return ONLY a valid JSON object: "
-        f"{{'article': '...', 'net_worth': '...', 'job_title': '...', 'main_assets': '...', 'wealth_sources': [], 'history': '...', 'seo_title': '...', 'seo_desc': '...', 'cats': []}}"
+        f"{{\"article\": \"...\", \"net_worth\": \"...\", \"job_title\": \"...\", \"main_assets\": \"...\", \"wealth_sources\": [], \"history\": \"...\", \"seo_title\": \"...\", \"seo_desc\": \"...\", \"cats\": []}}"
     )
     
     try:
         print("  🧠 AI generuoja tekstą...")
-        # BANDOME NAUDOTI TIK MODELIO PAVADINIMĄ (BE models/ AR v1beta)
-        response = client.models.generate_content(
-            model="gemini-1.5-flash", 
-            contents=prompt
-        )
+        response = model.generate_content(prompt)
         
+        # Išvalome JSON
         clean_text = re.search(r'\{.*\}', response.text, re.DOTALL)
         if not clean_text:
             print("  ❌ Klaida: AI nepateikė JSON.")
@@ -108,7 +100,6 @@ def run_wealth_bot(politician_name):
             print(f"  ❌ WP Klaida {res.status_code}")
             
     except Exception as e:
-        # Jei čia meta 404, išspausdiname visą klaidą detaliau
         print(f"  🚨 Klaida vykdant užduotį: {e}")
 
 if __name__ == "__main__":
