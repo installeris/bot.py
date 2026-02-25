@@ -7,14 +7,14 @@ import sys
 
 sys.stdout.reconfigure(line_buffering=True)
 
-print("--- 🏁 BOTAS STARTUOJA (SEO & ACF FIX) ---")
+print("--- 🏁 BOTAS STARTUOJA (ACF CHART & SEO FIX) ---")
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 WP_USER = os.getenv("WP_USERNAME")
 WP_PASS = os.getenv("WP_APP_PASS")
 WP_BASE_URL = "https://politiciannetworth.com/wp-json"
 
-# Surandame veikiantį modelį
+# --- API KONFIGŪRACIJA ---
 def get_working_model():
     url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_KEY}"
     try:
@@ -34,10 +34,10 @@ CAT_MAP = {
     "United Kingdom (UK)": 20, "Germany": 8, "France": 9, "Italy": 10, "Global": 23
 }
 
+# --- FUNKCIJOS ---
 def get_wiki_image(name):
     try:
-        # Pridedame User-Agent, kad Wikipedia neblokuotų
-        headers = {'User-Agent': 'WealthBot/1.0 (contact@politiciannetworth.com)'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         url = f"https://en.wikipedia.org/w/api.php?action=query&titles={name}&prop=pageimages&format=json&pithumbsize=1000"
         res = requests.get(url, headers=headers).json()
         pages = res.get("query", {}).get("pages", {})
@@ -48,7 +48,7 @@ def get_wiki_image(name):
 def upload_to_wp(image_url, politician_name):
     if not image_url: return None
     try:
-        img_res = requests.get(image_url)
+        img_res = requests.get(image_url, stream=True)
         headers = {
             "Content-Disposition": f"attachment; filename={politician_name.replace(' ', '_')}.jpg",
             "Content-Type": "image/jpeg"
@@ -58,22 +58,21 @@ def upload_to_wp(image_url, politician_name):
     except: return None
 
 def run_wealth_bot(politician_name):
-    print(f"\n💎 Dirbame su: {politician_name}")
+    print(f"\n💎 Ruošiamas: {politician_name}")
     img_id = upload_to_wp(get_wiki_image(politician_name), politician_name)
 
-    # Griežtesnis instruktažas AI
+    # Griežtas SEO ir ACF Chart promptas
     prompt = (
-        f"Research current reliable data for {politician_name}. Write a 600-word SEO article about their net worth. "
-        f"Format: Use <h2> and <h3>. \n"
-        f"IMPORTANT: Net worth must be a realistic number (e.g., '$15 Million'). \n"
-        f"Return ONLY JSON: {{"
-        f"\"article\": \"HTML content here\", "
-        f"\"net_worth\": \"Short string, e.g. $10 Million\", "
-        f"\"job_title\": \"Current role\", "
-        f"\"main_assets\": \"List assets\", "
-        f"\"seo_title\": \"Focus keyword rich title\", "
-        f"\"seo_desc\": \"160 char meta description\", "
-        f"\"cats\": [\"United States (USA)\"]}}"
+        f"Research {politician_name}. Write an 800-word SEO article. \n"
+        f"1. Generate data for a wealth chart (2019-2025). Format: years and values separated by commas. \n"
+        f"2. Return ONLY JSON: {{"
+        f"\"article\": \"HTML content\", "
+        f"\"net_worth\": \"e.g. $5 Million\", "
+        f"\"job_title\": \"Official role\", "
+        f"\"chart_data\": \"2019,2020,2021,2022,2023,2024,2025|1M,1.2M,1.5M,2M,3M,4M,5M\", "
+        f"\"seo_title\": \"Keyword rich title\", "
+        f"\"seo_desc\": \"Meta description\", "
+        f"\"cats\": [\"United States (USA)\", \"US Senate\"]}}"
     )
     
     try:
@@ -81,33 +80,37 @@ def run_wealth_bot(politician_name):
         ai_text = response.json()['candidates'][0]['content']['parts'][0]['text']
         data = json.loads(re.search(r'\{.*\}', ai_text, re.DOTALL).group())
 
-        # Paruošiame kategorijas
-        target_cats = [CAT_MAP[c] for c in data.get("cats", []) if c in CAT_MAP] or [23]
+        cat_ids = [CAT_MAP[c] for c in data.get("cats", []) if c in CAT_MAP]
 
+        # WordPress POST paketas
         payload = {
             "title": f"{politician_name} Net Worth",
             "content": data["article"],
             "status": "publish",
-            "categories": target_cats,
+            "categories": cat_ids,
             "featured_media": img_id,
-            # ACF LAUKAI (Patikrink ar tavo WP laukų vardai sutampa!)
+            # ACF LAUKAI (Pataisyk 'wealth_chart' pagal savo tikrąjį ACF slug!)
             "acf": {
                 "job_title": data.get("job_title", ""),
                 "net_worth": data.get("net_worth", ""),
-                "main_assets": data.get("main_assets", ""),
+                "wealth_chart": data.get("chart_data", ""), # <--- TAVO CHARTO LAUKAS
+                "main_assets": "Investments, Real Estate, Salary"
             },
-            # SEO (Yoast SEO laukai)
             "meta": {
                 "_yoast_wpseo_title": data.get("seo_title", ""),
-                "_yoast_wpseo_metadesc": data.get("seo_desc", "")
+                "_yoast_wpseo_metadesc": data.get("seo_desc", ""),
+                "rank_math_title": data.get("seo_title", ""),
+                "rank_math_description": data.get("seo_desc", "")
             }
         }
 
         res = requests.post(f"{WP_BASE_URL}/wp/v2/posts", json=payload, auth=(WP_USER, WP_PASS))
+        
         if res.status_code == 201:
-            print(f"  ✅ PUBLIKUOTA! (WP ID: {res.json()['id']})")
+            print(f"  ✅ SĖKMĖ: {politician_name} publikuotas! (Image ID: {img_id})")
         else:
             print(f"  ❌ WP Klaida: {res.text}")
+
     except Exception as e:
         print(f"  🚨 Klaida: {e}")
 
@@ -116,4 +119,4 @@ if __name__ == "__main__":
         with open("names.txt", "r") as f:
             for name in [n.strip() for n in f if n.strip()]:
                 run_wealth_bot(name)
-                time.sleep(20)
+                time.sleep(30)
