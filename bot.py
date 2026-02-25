@@ -5,22 +5,23 @@ import re
 import time
 import sys
 
-# Priverčiame tekstą pasirodyti GitHub lange iškart
+# Priverčiame tekstą GitHub lange pasirodyti akimirksniu (be buferio)
 sys.stdout.reconfigure(line_buffering=True)
 
-print("--- 🏁 BOTAS STARTUOJA (Direct API v1) ---")
+print("--- 🏁 BOTAS STARTUOJA (Direct v1beta Metodas) ---")
 
-# 1. KONFIGŪRACIJA
+# 1. KONFIGŪRACIJA IŠ GITHUB SECRETS
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 WP_USER = os.getenv("WP_USERNAME")
 WP_PASS = os.getenv("WP_APP_PASS")
 WP_BASE_URL = "https://politiciannetworth.com/wp-json"
 
-# Gemini API adresas (naudojame STABILIĄ v1 versiją)
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
+# Naudojame v1beta, nes v1 tavo regione meta 404
+GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
 
+# PATIKRA
 if not all([GEMINI_KEY, WP_USER, WP_PASS]):
-    print("🚨 KLAIDA: Trūksta GitHub Secrets!")
+    print("🚨 KLAIDA: Trūksta GitHub Secrets (GEMINI_API_KEY, WP_USERNAME arba WP_APP_PASS)!")
     sys.exit(1)
 
 CAT_MAP = {
@@ -63,29 +64,36 @@ def ask_gemini(prompt):
         raise Exception(f"Gemini API klaida: {response.status_code} - {response.text}")
 
 def run_wealth_bot(politician_name):
-    print(f"\n💎 Dirbame su: {politician_name}")
+    print(f"\n💎 Ruošiamas politikas: {politician_name}")
     
     img_url = get_wiki_image(politician_name)
     img_id = upload_to_wp(img_url, politician_name) if img_url else None
+    if img_id: print(f"  📸 Nuotrauka sėkmingai įkelta (ID: {img_id})")
 
+    # Griežtas SEO promptas
     prompt = (
         f"Research {politician_name}. Write a 600-word SEO article in English about their net worth. "
+        f"Use HTML tags like H2 and H3. Category: Politician Wealth. "
         f"Return ONLY a valid JSON object: "
         f"{{\"article\": \"...\", \"net_worth\": \"...\", \"job_title\": \"...\", \"main_assets\": \"...\", \"wealth_sources\": [], \"history\": \"...\", \"seo_title\": \"...\", \"seo_desc\": \"...\", \"cats\": []}}"
     )
     
     try:
-        print("  🧠 AI generuoja tekstą (Direct v1)...")
+        print("  🧠 AI generuoja turinį...")
         ai_response = ask_gemini(prompt)
         
+        # Išvalome JSON nuo galimų AI šiukšlių (pvz. ```json ...)
         clean_text = re.search(r'\{.*\}', ai_response, re.DOTALL)
         if not clean_text:
-            print("  ❌ Klaida: AI nepateikė JSON.")
+            print("  ❌ Klaida: AI nepateikė teisingo JSON formato.")
             return
             
         data = json.loads(clean_text.group())
+        
+        # Kategorijų parinkimas
         target_cats = [CAT_MAP[c] for c in data.get("cats", []) if c in CAT_MAP] or [23]
 
+        # WordPress duomenų paketas
         payload = {
             "title": f"{politician_name} Net Worth",
             "content": data["article"],
@@ -101,11 +109,13 @@ def run_wealth_bot(politician_name):
             }
         }
 
+        print("  ✉️ Siunčiame į WordPress...")
         res = requests.post(f"{WP_BASE_URL}/wp/v2/posts", json=payload, auth=(WP_USER, WP_PASS))
+        
         if res.status_code == 201:
-            print(f"  ✅ SĖKMĖ: {politician_name} paskelbtas!")
+            print(f"  ✅ SĖKMĖ: {politician_name} sėkmingai publikuotas!")
         else:
-            print(f"  ❌ WP Klaida {res.status_code}: {res.text}")
+            print(f"  ❌ WordPress klaida {res.status_code}: {res.text}")
             
     except Exception as e:
         print(f"  🚨 Klaida: {e}")
@@ -115,11 +125,11 @@ if __name__ == "__main__":
         with open("names.txt", "r") as f:
             names = [l.strip() for l in f if l.strip()]
         
-        print(f"📚 Rasta vardų: {len(names)}")
+        print(f"📚 Sąraše rasta vardų: {len(names)}")
         for i, name in enumerate(names, 1):
             run_wealth_bot(name)
             if i < len(names):
-                print(f"⏳ Miegame 30 sek. (testas)... ")
-                time.sleep(30) # Sutrumpinau testui
+                print(f"⏳ Miegame 30 sek. (testinė pertrauka)...")
+                time.sleep(30)
     else:
-        print("🚨 KLAIDA: names.txt nerastas!")
+        print("🚨 KLAIDA: names.txt failas nerastas!")
