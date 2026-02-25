@@ -7,21 +7,40 @@ import sys
 
 sys.stdout.reconfigure(line_buffering=True)
 
-print("--- 💎 KOKYBIŠKO TURINIO BOTAS (Final URL Fix) ---")
+print("--- 🛠️ BOTAS STARTUOJA (Universal Model Detection) ---")
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 WP_USER = os.getenv("WP_USERNAME")
 WP_PASS = os.getenv("WP_APP_PASS")
 WP_BASE_URL = "https://politiciannetworth.com/wp-json"
 
-# Kategorijų ID
+# Kategorijų žemėlapis
 CAT_MAP = {"US Senate": 1, "US House of Representatives": 2, "Executive Branch": 3, "State Governors": 4, "United States (USA)": 19}
 WEALTH_OPTIONS = ["Stock Market Investments", "Real Estate Holdings", "Venture Capital", "Professional Law Practice", "Family Inheritance"]
 
-# 2026 m. stabiliausias URL formatas mokamam planui
-# Atkreipk dėmesį: v1beta/models/ID:generateContent
-MODEL_ID = "gemini-1.5-flash-latest"
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_ID}:generateContent?key={GEMINI_KEY}"
+def get_best_model_url():
+    """Automatiškai randa veikiantį Gemini modelio URL."""
+    # Bandome v1beta ir v1 versijas
+    versions = ["v1beta", "v1"]
+    # Modeliai, kurių ieškome (prioriteto tvarka)
+    targets = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-2.0-flash-exp"]
+    
+    for ver in versions:
+        list_url = f"https://generativelanguage.googleapis.com/{ver}/models?key={GEMINI_KEY}"
+        try:
+            res = requests.get(list_url).json()
+            if 'models' in res:
+                available = [m['name'] for m in res['models'] if 'generateContent' in m.get('supportedGenerationMethods', [])]
+                for target in targets:
+                    for full_name in available:
+                        if target in full_name:
+                            print(f"✅ RASTAS MODELIS: {full_name} ({ver})")
+                            return f"https://generativelanguage.googleapis.com/{ver}/{full_name}:generateContent?key={GEMINI_KEY}"
+        except:
+            continue
+    return None
+
+GENERATE_URL = get_best_model_url()
 
 def get_wiki_image(name):
     try:
@@ -42,45 +61,34 @@ def upload_to_wp(image_url, politician_name):
     except: return None
 
 def run_wealth_bot(politician_name):
+    if not GENERATE_URL:
+        print("🚨 KLAIDA: Nepavyko rasti jokio veikiančio Gemini modelio tavo paskyroje!")
+        return
+
     print(f"\n🚀 Ruošiamas pilnas straipsnis: {politician_name}")
     img_id = upload_to_wp(get_wiki_image(politician_name), politician_name)
 
-    # Griežtas promptas kokybei užtikrinti
+    # Maksimalios kokybės promptas
     prompt = (
-        f"Write a comprehensive 800-word financial biography for {politician_name} for 2026. \n"
-        f"1. STRUCTURE: Use H2 and H3 HTML tags. Detailed career, asset breakdown, and investment strategy. \n"
-        f"2. NET WORTH: Use full figures (e.g., $15,400,000). \n"
-        f"3. CHART: Return 'net_worth_history' as '2020:10000000,2022:12500000,2026:15400000'. \n"
-        f"4. SOURCES: Include 2-3 REAL links using <a href='...'>Source Name</a> tags. \n"
-        f"5. CATEGORIES: Select multiple from {list(CAT_MAP.keys())}. \n"
-        f"Return ONLY valid JSON."
+        f"Write a 1000-word financial analysis of {politician_name} for 2026. \n"
+        f"Use HTML (H2, H3 tags). Be detailed about career and specific assets. \n"
+        f"Net worth must be a precise full number (e.g. $12,500,000). \n"
+        f"Include 2-3 REAL source links using <a href='...'> tags. \n"
+        f"Return ONLY JSON: {{\"article\": \"HTML\", \"net_worth\": \"$X\", \"job_title\": \"Title\", \"history\": \"2020:X,2026:Y\", \"sources_html\": \"Sources\", \"source_of_wealth\": [], \"key_assets\": \"Assets\", \"seo_title\": \"Title\", \"seo_desc\": \"Desc\", \"cats\": [\"United States (USA)\"]}}"
     )
 
-    safety_settings = [
-        {"category": c, "threshold": "BLOCK_NONE"} 
-        for c in ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]
-    ]
-
     try:
-        response = requests.post(GEMINI_URL, json={
+        response = requests.post(GENERATE_URL, json={
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"response_mime_type": "application/json", "temperature": 0.7},
-            "safetySettings": safety_settings
+            "generationConfig": {"response_mime_type": "application/json", "temperature": 0.8},
+            "safetySettings": [{"category": c, "threshold": "BLOCK_NONE"} for c in ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]]
         })
         
-        resp_json = response.json()
-        
-        # Jei vis dar meta 404, išspausdiname visą atsakymą derinimui
-        if 'candidates' not in resp_json:
-            print(f"  ❌ API Klaida: {resp_json}")
-            return
-
-        raw_text = resp_json['candidates'][0]['content']['parts'][0]['text']
-        data = json.loads(raw_text)
+        data = json.loads(response.json()['candidates'][0]['content']['parts'][0]['text'])
 
         payload = {
             "title": f"{politician_name} Net Worth",
-            "content": data.get("article", ""),
+            "content": data["article"],
             "status": "publish",
             "featured_media": img_id,
             "categories": [CAT_MAP[c] for c in data.get("cats", []) if c in CAT_MAP],
@@ -96,18 +104,15 @@ def run_wealth_bot(politician_name):
             "rank_math_description": data.get("seo_desc", "")
         }
 
-        res = requests.post(f"{WP_BASE_URL}/wp/v2/posts", json=payload, auth=(WP_USER, WP_PASS))
-        if res.status_code == 201:
-            print(f"  ✅ SĖKMĖ: {politician_name} paskelbtas!")
-        else:
-            print(f"  ❌ WP Klaida: {res.text}")
+        wp_res = requests.post(f"{WP_BASE_URL}/wp/v2/posts", json=payload, auth=(WP_USER, WP_PASS))
+        print(f"  ✅ SĖKMĖ: {politician_name} paskelbtas!" if wp_res.status_code == 201 else f"  ❌ WP Klaida: {wp_res.text}")
 
     except Exception as e:
-        print(f"  🚨 Klaida apdorojant {politician_name}: {e}")
+        print(f"  🚨 Klaida: {e}")
 
 if __name__ == "__main__":
     if os.path.exists("names.txt"):
         with open("names.txt", "r") as f:
             for name in [n.strip() for n in f if n.strip()]:
                 run_wealth_bot(name)
-                time.sleep(5) # Greitas kėlimas mokamam planui
+                time.sleep(5)
