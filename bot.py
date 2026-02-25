@@ -7,30 +7,50 @@ import sys
 
 sys.stdout.reconfigure(line_buffering=True)
 
-print("--- 🚀 BOTAS STARTUOJA (JSON Mode & Stability Fix) ---")
+print("--- 🛠️ BOTAS STARTUOJA (Auto-Fix Mode) ---")
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 WP_USER = os.getenv("WP_USERNAME")
 WP_PASS = os.getenv("WP_APP_PASS")
 WP_BASE_URL = "https://politiciannetworth.com/wp-json"
 
-# Naudojame v1beta, nes ji geriausiai palaiko JSON Mode
-MODEL_ID = "gemini-1.5-flash"
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_ID}:generateContent?key={GEMINI_KEY}"
+def get_working_model():
+    """Automatiškai randa tikslų modelio pavadinimą tavo paskyrai."""
+    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_KEY}"
+    try:
+        res = requests.get(url).json()
+        if 'models' not in res:
+            print(f"🚨 Klaida pasiekiant API: {res}")
+            return None
+        
+        # Ieškome bet kurio 'flash' modelio, kuris palaiko turinio kūrimą
+        for m in res['models']:
+            if "flash" in m['name'] and "generateContent" in m['supportedGenerationMethods']:
+                print(f"✅ Rastas veikiantis modelis: {m['name']}")
+                return m['name']
+        return None
+    except Exception as e:
+        print(f"⚠️ Nepavyko gauti modelių sąrašo: {e}")
+        return None
+
+# Nustatome veikiantį modelį
+MODEL_PATH = get_working_model()
 
 def run_wealth_bot(politician_name):
+    if not MODEL_PATH:
+        print("🚨 Klaida: Nerastas tinkamas modelis. Patikrink API raktą.")
+        return
+
     print(f"💎 Analizuojamas: {politician_name}")
     
-    # Griežtas nurodymas dėl struktūros
+    # URL dabar formuojamas dinamiškai pagal tai, ką grąžino Google
+    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/{MODEL_PATH}:generateContent?key={GEMINI_KEY}"
+    
     prompt = (
         f"Research {politician_name} for a net worth article set in 2026. "
-        f"Return a JSON object with these EXACT keys: "
-        f"'article' (full HTML content), 'net_worth' (string), 'job_title' (string), "
-        f"'history' (string format 2019:X,2020:Y), 'sources_html' (HTML links), "
-        f"'source_of_wealth' (array of strings), 'seo_title' (string), 'seo_desc' (string)."
+        f"Return ONLY a JSON object with keys: article, net_worth, job_title, history, sources_html, source_of_wealth, seo_title, seo_desc."
     )
     
-    # Konfigūracija, kuri priverčia Gemini grąžinti TIK JSON
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
@@ -39,50 +59,41 @@ def run_wealth_bot(politician_name):
     }
     
     try:
-        response = requests.post(GEMINI_URL, json=payload, timeout=60)
-        res_data = response.json()
+        response = requests.post(gemini_url, json=payload, timeout=60)
+        data = response.json()
         
-        if 'candidates' in res_data:
-            # Ištraukiame tekstą, kuris dabar garantuotai yra JSON formatu
-            raw_output = res_data['candidates'][0]['content']['parts'][0]['text']
-            data = json.loads(raw_output)
-            
-            # Patikriname, ar visi raktai egzistuoja, kad išvengtume KeyError
-            article_content = data.get("article", "No content generated")
+        if 'candidates' in data:
+            raw_text = data['candidates'][0]['content']['parts'][0]['text']
+            content = json.loads(raw_text)
             
             wp_payload = {
                 "title": f"{politician_name} Net Worth",
-                "content": article_content,
+                "content": content.get("article", ""),
                 "status": "publish",
-                "categories": [19], # United States (USA)
+                "categories": [19],
                 "acf": {
-                    "job_title": data.get("job_title", ""),
-                    "net_worth": data.get("net_worth", ""),
-                    "net_worth_history": data.get("history", ""),
-                    "source_of_wealth": data.get("source_of_wealth", []),
-                    "sources": data.get("sources_html", "")
+                    "job_title": content.get("job_title", ""),
+                    "net_worth": content.get("net_worth", ""),
+                    "net_worth_history": content.get("history", ""),
+                    "source_of_wealth": content.get("source_of_wealth", []),
+                    "sources": content.get("sources_html", "")
                 },
-                "rank_math_title": data.get("seo_title", ""),
-                "rank_math_description": data.get("seo_desc", "")
+                "rank_math_title": content.get("seo_title", ""),
+                "rank_math_description": content.get("seo_desc", "")
             }
             
             res = requests.post(f"{WP_BASE_URL}/wp/v2/posts", json=wp_payload, auth=(WP_USER, WP_PASS))
-            
-            if res.status_code == 201:
-                print(f"  ✅ SĖKMĖ: {politician_name} paskelbtas!")
-            else:
-                print(f"  ❌ WP Klaida: {res.text}")
+            print(f"  ✅ SĖKMĖ: {politician_name}" if res.status_code == 201 else f"  ❌ WP Klaida: {res.status_code}")
         else:
-            print(f"  ❌ API Klaida: {res_data}")
+            print(f"  ❌ API Klaida: {data}")
 
     except Exception as e:
-        print(f"  🚨 Kritinė klaida: {e}")
+        print(f"  🚨 Klaida apdorojant {politician_name}: {e}")
 
 if __name__ == "__main__":
     if os.path.exists("names.txt"):
         with open("names.txt", "r") as f:
             names = [n.strip() for n in f if n.strip()]
-        
         for name in names:
             run_wealth_bot(name)
-            time.sleep(3) # Maža pauzė dėl WP stabilumo
+            time.sleep(3)
