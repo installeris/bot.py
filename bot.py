@@ -7,87 +7,82 @@ import sys
 
 sys.stdout.reconfigure(line_buffering=True)
 
-print("--- 🛠️ BOTAS STARTUOJA (Universal Model Fix) ---")
+print("--- ⚡ BOTAS STARTUOJA (Mokamas planas: Didelis greitis) ---")
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 WP_USER = os.getenv("WP_USERNAME")
 WP_PASS = os.getenv("WP_APP_PASS")
 WP_BASE_URL = "https://politiciannetworth.com/wp-json"
 
-# Išbandome du galimus modelio variantus
-MODEL_VARIANTS = ["gemini-1.5-flash", "gemini-1.5-flash-latest"]
-
-def get_gemini_response(prompt):
-    for model_id in MODEL_VARIANTS:
-        # Svarbu: v1beta endpoint'as kartais reikalauja /models/ prieš pavadinimą
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_KEY}"
-        try:
-            response = requests.post(url, json={
-                "contents": [{"parts": [{"text": prompt}]}],
-                "safetySettings": [{"category": c, "threshold": "BLOCK_NONE"} for c in ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]]
-            })
-            res_data = response.json()
-            if 'candidates' in res_data:
-                print(f"✅ Sėkmingai panaudotas modelis: {model_id}")
-                return res_data
-            else:
-                print(f"⚠️ Modelis {model_id} netiko, bandomas kitas...")
-        except:
-            continue
-    return None
+# Naudojame stabilią v1 versiją. Ji pigiausia ir greičiausia Paid Tier'e.
+MODEL_ID = "gemini-1.5-flash"
+GEMINI_URL = f"https://generativelanguage.googleapis.com/v1/models/{MODEL_ID}:generateContent?key={GEMINI_KEY}"
 
 WEALTH_OPTIONS = ["Stock Market Investments", "Real Estate Holdings", "Venture Capital", "Professional Law Practice", "Family Inheritance", "Book Deals & Royalties", "Corporate Board Seats", "Consulting Fees", "Hedge Fund Interests", "Cryptocurrency Assets"]
-CAT_MAP = {"US Senate": 1, "US House of Representatives": 2, "Executive Branch": 3, "State Governors": 4, "European Parliament": 18, "United States (USA)": 19, "United Kingdom (UK)": 20, "Germany": 8, "France": 9, "Italy": 10, "Global": 23}
 
 def run_wealth_bot(politician_name):
-    print(f"\n💎 Ruošiamas: {politician_name}")
+    print(f"🚀 Generuojama: {politician_name}...")
     
     prompt = (
-        f"Research {politician_name} net worth for 2026. \n"
-        f"1. WEALTH: 2026 estimate (8% growth logic). \n"
-        f"2. SOURCES: 2-3 real clickable HTML links. \n"
-        f"3. SEO: Title and Description for Rank Math. \n"
-        f"Return ONLY valid JSON: {{\"article\": \"HTML\", \"net_worth\": \"$X\", \"job_title\": \"Role\", \"history\": \"2019:X...\", \"sources_html\": \"Links\", \"source_of_wealth\": [], \"key_assets\": \"Assets\", \"seo_title\": \"Title\", \"seo_desc\": \"Desc\", \"cats\": [\"United States (USA)\", \"US Senate\"]}}"
+        f"Generate a professional financial report for {politician_name} for 2026. \n"
+        f"Return ONLY a valid JSON object: {{\"article\": \"HTML content with H2/H3 tags\", \"net_worth\": \"$X,XXX,XXX\", \"job_title\": \"Official Role\", \"history\": \"2019:X,2020:Y...\", \"sources_html\": \"Links\", \"source_of_wealth\": [], \"key_assets\": \"Assets\", \"seo_title\": \"SEO Title\", \"seo_desc\": \"Meta Desc\", \"cats\": [\"United States (USA)\"]}}"
     )
     
-    resp_json = get_gemini_response(prompt)
-    
-    if not resp_json:
-        print(f"🚨 Klaida: Nepavyko rasti tinkančio modelio arba viršyti limitai.")
-        return
+    # Retry logika: bando iki 3 kartų, jei gauna klaidą
+    for attempt in range(3):
+        try:
+            response = requests.post(GEMINI_URL, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=30)
+            res_data = response.json()
+            
+            if 'candidates' in res_data:
+                ai_text = res_data['candidates'][0]['content']['parts'][0]['text']
+                data = json.loads(re.search(r'\{.*\}', ai_text, re.DOTALL).group())
+                
+                payload = {
+                    "title": f"{politician_name} Net Worth",
+                    "content": data["article"],
+                    "status": "publish",
+                    "categories": [19], # United States (USA)
+                    "acf": {
+                        "job_title": data.get("job_title", ""),
+                        "net_worth": data.get("net_worth", ""),
+                        "net_worth_history": data.get("history", ""),
+                        "source_of_wealth": [s for s in data.get("source_of_wealth", []) if s in WEALTH_OPTIONS],
+                        "main_assets": data.get("key_assets", ""),
+                        "sources": data.get("sources_html", "")
+                    },
+                    "rank_math_title": data.get("seo_title", ""),
+                    "rank_math_description": data.get("seo_desc", "")
+                }
+                
+                wp_res = requests.post(f"{WP_BASE_URL}/wp/v2/posts", json=payload, auth=(WP_USER, WP_PASS))
+                if wp_res.status_code == 201:
+                    print(f"  ✅ SĖKMĖ: {politician_name} paskelbtas.")
+                    return # Išeiname iš funkcijos po sėkmės
+                else:
+                    print(f"  ❌ WP Klaida: {wp_res.text}")
+                    break
+            
+            elif "429" in str(res_data):
+                wait_time = (attempt + 1) * 5
+                print(f"  ⚠️ Limitai viršyti. Laukiame {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                print(f"  ⚠️ Bandymas {attempt+1} nepavyko: {res_data}")
+                time.sleep(2)
 
-    try:
-        ai_text = resp_json['candidates'][0]['content']['parts'][0]['text']
-        data = json.loads(re.search(r'\{.*\}', ai_text, re.DOTALL).group())
-        
-        payload = {
-            "title": f"{politician_name} Net Worth",
-            "content": data["article"],
-            "status": "publish",
-            "categories": [CAT_MAP[c] for c in data.get("cats", []) if c in CAT_MAP],
-            "acf": {
-                "job_title": data.get("job_title", ""),
-                "net_worth": data.get("net_worth", ""),
-                "net_worth_history": data.get("history", ""),
-                "source_of_wealth": [s for s in data.get("source_of_wealth", []) if s in WEALTH_OPTIONS],
-                "main_assets": data.get("key_assets", ""),
-                "sources": data.get("sources_html", "")
-            },
-            "rank_math_title": data.get("seo_title", ""),
-            "rank_math_description": data.get("seo_desc", ""),
-            "rank_math_focus_keyword": f"{politician_name} net worth"
-        }
-
-        res = requests.post(f"{WP_BASE_URL}/wp/v2/posts", json=payload, auth=(WP_USER, WP_PASS))
-        print(f"  ✅ SĖKMĖ: {politician_name} paskelbtas!" if res.status_code == 201 else f"  ❌ WP Klaida: {res.text}")
-
-    except Exception as e:
-        print(f"  🚨 Klaida apdorojant duomenis: {e}")
+        except Exception as e:
+            print(f"  🚨 Klaida su {politician_name}: {e}")
+            time.sleep(2)
 
 if __name__ == "__main__":
     if os.path.exists("names.txt"):
         with open("names.txt", "r") as f:
             names = [n.strip() for n in f if n.strip()]
-        for i, name in enumerate(names, 1):
+        
+        for name in names:
             run_wealth_bot(name)
-            time.sleep(75)
+            # Dabar užtenka 3-5 sekundžių tarpų, kad WordPress spėtų suvirškinti nuotraukas/duomenis
+            time.sleep(3) 
+
+print("\n--- 🏁 VISI VARDAI APDOROTI ---")
