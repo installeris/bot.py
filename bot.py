@@ -7,7 +7,7 @@ import sys
 
 sys.stdout.reconfigure(line_buffering=True)
 
-print("--- 🏁 BOTAS STARTUOJA (Net Worth, SEO & History Fix) ---")
+print("--- 🏁 BOTAS STARTUOJA (Galutinis SEO & Wealth Sync) ---")
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 WP_USER = os.getenv("WP_USERNAME")
@@ -63,16 +63,14 @@ def run_wealth_bot(politician_name):
     img_id = upload_to_wp(get_wiki_image(politician_name), politician_name)
 
     prompt = (
-        f"Research current financial disclosure data for {politician_name}. Write an 800-word SEO article. \n"
-        f"1. Net worth: Be realistic. Use data from OpenSecrets or official disclosures. Format: '$12,500,000'. \n"
-        f"2. History: Generate yearly wealth (2019-2026). Format: 2019:100000,2020:150000... \n"
-        f"3. Categories: You MUST pick 'United States (USA)' AND the correct branch (e.g., 'US Senate'). \n"
-        f"4. Assets: Pick ONLY 1-2 most important assets. \n"
-        f"5. Source of Wealth: Pick 3-5 relevant options from: {WEALTH_OPTIONS}. \n"
+        f"Analyze {politician_name} for a 2026 net worth article. \n"
+        f"1. WEALTH LOGIC: Research their 2018-2024 financial disclosures. If data is old, estimate 2026 value by adding 8% annual growth to their last known wealth. Total net worth must be realistic (e.g., John Barrasso should be ~$12M-$16M in 2026). \n"
+        f"2. SOURCES: Find 2-3 real external URLs (OpenSecrets, Forbes, etc.) and return them as HTML links. \n"
+        f"3. SEO: Create a focus-keyword rich Title and Meta Description. \n"
         f"Return ONLY JSON: {{"
-        f"\"article\": \"HTML content\", \"net_worth\": \"$1,500,000\", \"job_title\": \"Role\", "
-        f"\"history\": \"2019:100000,2020:120000...\", \"sources\": \"OpenSecrets, Wikipedia, Financial Disclosures\", "
-        f"\"source_of_wealth\": [], \"key_assets\": \"Asset 1, Asset 2\", "
+        f"\"article\": \"HTML\", \"net_worth\": \"$15,200,000\", \"job_title\": \"Role\", "
+        f"\"history\": \"2019:8500000,2020:9200000...\", \"sources_html\": \"HTML links\", "
+        f"\"source_of_wealth\": [], \"key_assets\": \"1-2 items\", "
         f"\"seo_title\": \"SEO Title\", \"seo_desc\": \"Meta Description\", \"cats\": [\"United States (USA)\", \"US Senate\"]}}"
     )
     
@@ -93,20 +91,23 @@ def run_wealth_bot(politician_name):
             "acf": {
                 "job_title": data.get("job_title", ""),
                 "net_worth": data.get("net_worth", ""),
-                "net_worth_history": data.get("history", ""), # CHARTA FIX
+                "net_worth_history": data.get("history", ""),
                 "source_of_wealth": valid_sources,
                 "main_assets": data.get("key_assets", ""),
-                "sources": data.get("sources", "") # SOURCES FIX
+                "sources": data.get("sources_html", "")
             },
-            "meta": {
-                "rank_math_title": data.get("seo_title", ""),
-                "rank_math_description": data.get("seo_desc", ""),
-                "rank_math_focus_keyword": f"{politician_name} net worth"
-            }
+            # Šie laukai dabar veiks per Rank Math API Manager įskiepį
+            "rank_math_title": data.get("seo_title", ""),
+            "rank_math_description": data.get("seo_desc", ""),
+            "rank_math_focus_keyword": f"{politician_name} net worth"
         }
 
         res = requests.post(f"{WP_BASE_URL}/wp/v2/posts", json=payload, auth=(WP_USER, WP_PASS))
-        print(f"  ✅ SĖKMĖ: {politician_name} publikuotas!" if res.status_code == 201 else f"  ❌ Klaida: {res.text}")
+        
+        if res.status_code == 201:
+            print(f"  ✅ SĖKMĖ: {politician_name} publikuotas su SEO ir History!")
+        else:
+            print(f"  ❌ WP Klaida: {res.text}")
 
     except Exception as e:
         print(f"  🚨 Klaida: {e}")
