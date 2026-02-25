@@ -23,7 +23,7 @@ if not all([GEMINI_KEY, WP_USER, WP_PASS]):
 
 # Konfigūruojame Gemini
 genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel('models/gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-1.5-flash-8b')
 
 CAT_MAP = {
     "US Senate": 1, "US House of Representatives": 2, "Executive Branch": 3,
