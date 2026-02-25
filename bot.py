@@ -7,16 +7,21 @@ import sys
 
 sys.stdout.reconfigure(line_buffering=True)
 
-print("--- 💎 KOKYBIŠKO TURINIO BOTAS (Unfiltered Mode) ---")
+print("--- 💎 KOKYBIŠKO TURINIO BOTAS (Final URL Fix) ---")
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 WP_USER = os.getenv("WP_USERNAME")
 WP_PASS = os.getenv("WP_APP_PASS")
 WP_BASE_URL = "https://politiciannetworth.com/wp-json"
 
-# Kategorijų ID iš tavo svetainės
+# Kategorijų ID
 CAT_MAP = {"US Senate": 1, "US House of Representatives": 2, "Executive Branch": 3, "State Governors": 4, "United States (USA)": 19}
 WEALTH_OPTIONS = ["Stock Market Investments", "Real Estate Holdings", "Venture Capital", "Professional Law Practice", "Family Inheritance"]
+
+# 2026 m. stabiliausias URL formatas mokamam planui
+# Atkreipk dėmesį: v1beta/models/ID:generateContent
+MODEL_ID = "gemini-1.5-flash-latest"
+GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_ID}:generateContent?key={GEMINI_KEY}"
 
 def get_wiki_image(name):
     try:
@@ -40,47 +45,42 @@ def run_wealth_bot(politician_name):
     print(f"\n🚀 Ruošiamas pilnas straipsnis: {politician_name}")
     img_id = upload_to_wp(get_wiki_image(politician_name), politician_name)
 
-    # Maksimaliai detalus promptas kokybei
+    # Griežtas promptas kokybei užtikrinti
     prompt = (
-        f"Write a long-form professional financial article (min 800 words) about {politician_name} for 2026. \n"
-        f"1. ARTICLE: Use H2 and H3 headings. Detailed career path, investment analysis, and net worth breakdown. \n"
-        f"2. DATA: Net worth must be a full number like '$15,400,000'. History format: '2020:10000000,2022:12000000,2026:15400000'. \n"
-        f"3. LINKS: Include 2-3 REAL source links as HTML <a> tags. \n"
-        f"4. CATEGORIES: Choose from {list(CAT_MAP.keys())}. \n"
-        f"Return ONLY JSON: {{"
-        f"\"article\": \"Full HTML\", \"net_worth\": \"$XX,XXX,XXX\", \"job_title\": \"Title\", "
-        f"\"history\": \"2020:X,2026:Y\", \"sources_html\": \"Sources\", \"source_of_wealth\": [], "
-        f"\"key_assets\": \"Specific assets\", \"seo_title\": \"SEO Title\", \"seo_desc\": \"Desc\", \"cats\": []}}"
+        f"Write a comprehensive 800-word financial biography for {politician_name} for 2026. \n"
+        f"1. STRUCTURE: Use H2 and H3 HTML tags. Detailed career, asset breakdown, and investment strategy. \n"
+        f"2. NET WORTH: Use full figures (e.g., $15,400,000). \n"
+        f"3. CHART: Return 'net_worth_history' as '2020:10000000,2022:12500000,2026:15400000'. \n"
+        f"4. SOURCES: Include 2-3 REAL links using <a href='...'>Source Name</a> tags. \n"
+        f"5. CATEGORIES: Select multiple from {list(CAT_MAP.keys())}. \n"
+        f"Return ONLY valid JSON."
     )
 
-    # Naudojame naujausią stabilią versiją
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_KEY}"
-    
-    # Saugumo nustatymai - išjungiam blokavimą
     safety_settings = [
-        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+        {"category": c, "threshold": "BLOCK_NONE"} 
+        for c in ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]
     ]
 
     try:
-        response = requests.post(url, json={
+        response = requests.post(GEMINI_URL, json={
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"response_mime_type": "application/json"},
+            "generationConfig": {"response_mime_type": "application/json", "temperature": 0.7},
             "safetySettings": safety_settings
         })
         
         resp_json = response.json()
+        
+        # Jei vis dar meta 404, išspausdiname visą atsakymą derinimui
         if 'candidates' not in resp_json:
             print(f"  ❌ API Klaida: {resp_json}")
             return
 
-        data = json.loads(resp_json['candidates'][0]['content']['parts'][0]['text'])
+        raw_text = resp_json['candidates'][0]['content']['parts'][0]['text']
+        data = json.loads(raw_text)
 
         payload = {
             "title": f"{politician_name} Net Worth",
-            "content": data["article"],
+            "content": data.get("article", ""),
             "status": "publish",
             "featured_media": img_id,
             "categories": [CAT_MAP[c] for c in data.get("cats", []) if c in CAT_MAP],
@@ -93,8 +93,7 @@ def run_wealth_bot(politician_name):
                 "sources": data.get("sources_html", "")
             },
             "rank_math_title": data.get("seo_title", ""),
-            "rank_math_description": data.get("seo_desc", ""),
-            "rank_math_focus_keyword": f"{politician_name} net worth"
+            "rank_math_description": data.get("seo_desc", "")
         }
 
         res = requests.post(f"{WP_BASE_URL}/wp/v2/posts", json=payload, auth=(WP_USER, WP_PASS))
@@ -104,11 +103,11 @@ def run_wealth_bot(politician_name):
             print(f"  ❌ WP Klaida: {res.text}")
 
     except Exception as e:
-        print(f"  🚨 Klaida: {e}")
+        print(f"  🚨 Klaida apdorojant {politician_name}: {e}")
 
 if __name__ == "__main__":
     if os.path.exists("names.txt"):
         with open("names.txt", "r") as f:
             for name in [n.strip() for n in f if n.strip()]:
                 run_wealth_bot(name)
-                time.sleep(5)
+                time.sleep(5) # Greitas kėlimas mokamam planui
