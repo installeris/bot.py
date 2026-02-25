@@ -1,6 +1,6 @@
 import os
 import requests
-import google.generativeai as genai
+from google import genai
 import json
 import re
 import time
@@ -9,11 +9,10 @@ import time
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 WP_USER = os.getenv("WP_USERNAME")
 WP_PASS = os.getenv("WP_APP_PASS")
-# Tavo svetainės pagrindinis adresas be galinio brūkšnio
 WP_BASE_URL = "https://politiciannetworth.com/wp-json"
 
-genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+# Naujas klientas pagal naują biblioteką
+client = genai.Client(api_key=GEMINI_KEY)
 
 CAT_MAP = {
     "US Senate": 1, "US House of Representatives": 2, "Executive Branch": 3,
@@ -22,14 +21,11 @@ CAT_MAP = {
 }
 
 def get_wiki_image(name):
-    """Suranda oficialią Wikipedia nuotraukos nuorodą pagal vardą."""
+    print(f"  🖼️ Ieškoma nuotrauka Wikipedia: {name}")
     try:
         params = {
-            "action": "query",
-            "titles": name,
-            "prop": "pageimages",
-            "format": "json",
-            "pithumbsize": 1000  # Aukštos kokybės nuotrauka
+            "action": "query", "titles": name, "prop": "pageimages",
+            "format": "json", "pithumbsize": 1000
         }
         res = requests.get("https://en.wikipedia.org/w/api.php", params=params).json()
         pages = res.get("query", {}).get("pages", {})
@@ -41,53 +37,49 @@ def get_wiki_image(name):
     return None
 
 def upload_to_wp(image_url, politician_name):
-    """Atsisiunčia nuotrauką iš Wiki ir įkelia į WordPress."""
     try:
         img_data = requests.get(image_url).content
         headers = {
             "Content-Disposition": f"attachment; filename={politician_name.replace(' ', '_')}.jpg",
             "Content-Type": "image/jpeg"
         }
-        res = requests.post(
-            f"{WP_BASE_URL}/wp/v2/media",
-            data=img_data,
-            headers=headers,
-            auth=(WP_USER, WP_PASS)
-        )
+        res = requests.post(f"{WP_BASE_URL}/wp/v2/media", data=img_data, headers=headers, auth=(WP_USER, WP_PASS))
         if res.status_code == 201:
-            return res.json()["id"] # Grąžina nuotraukos ID
+            return res.json()["id"]
     except Exception as e:
-        print(f"🖼️ Nuotraukos klaida: {e}")
+        print(f"  ⚠️ Nepavyko įkelti nuotraukos: {e}")
     return None
 
 def run_wealth_bot(politician_name):
-    print(f"🚀 Procesas: {politician_name}...")
+    print(f"\n--- Pradedamas darbas su: {politician_name} ---")
     
-    # 1. Surandame nuotrauką
-    image_url = get_wiki_image(politician_name)
-    featured_image_id = None
-    if image_url:
-        print(f"📸 Rasta nuotrauka: {image_url}")
-        featured_image_id = upload_to_wp(image_url, politician_name)
+    img_url = get_wiki_image(politician_name)
+    img_id = upload_to_wp(img_url, politician_name) if img_url else None
+    if img_id: print(f"  ✅ Nuotrauka paruošta (ID: {img_id})")
 
-    # 2. Generuojame straipsnį
-    prompt = f"Research {politician_name}. Write 600-word SEO article in English (H2, H3, HTML). Return JSON with keys: article, net_worth, job_title, main_assets, wealth_sources, history, seo_title, seo_desc, cats."
+    prompt = f"""Research {politician_name}. Write 600-word SEO article in English (H2, H3, HTML). 
+    Focus on net worth. Return ONLY JSON with keys: article, net_worth, job_title, main_assets, 
+    wealth_sources, history, seo_title, seo_desc, cats."""
     
     try:
-        response = model.generate_content(prompt)
-        json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
-        if not json_match: return
+        # Naujas iškvietimo būdas
+        response = client.models.generate_content(model="gemini-1.5-flash", contents=prompt)
+        text = response.text
+        
+        json_match = re.search(r'\{.*\}', text, re.DOTALL)
+        if not json_match:
+            print("  ❌ AI nesugeneravo JSON")
+            return
+            
         data = json.loads(json_match.group())
-
-        target_cats = [CAT_MAP[c] for c in data.get("cats", []) if c in CAT_MAP]
-        if not target_cats: target_cats = [23]
+        target_cats = [CAT_MAP[c] for c in data.get("cats", []) if c in CAT_MAP] or [23]
 
         payload = {
             "title": f"{politician_name} Net Worth",
             "content": data["article"],
             "status": "publish",
             "categories": target_cats,
-            "featured_media": featured_image_id, # Čia susiejame nuotrauką!
+            "featured_media": img_id,
             "acf": {
                 "job_title": data["job_title"],
                 "net_worth": data["net_worth"],
@@ -95,27 +87,29 @@ def run_wealth_bot(politician_name):
                 "main_assets": data["main_assets"],
                 "net_worth_history": data["history"],
                 "sources": "https://en.wikipedia.org"
-            },
-            "rank_math_title": data["seo_title"],
-            "rank_math_description": data["seo_desc"]
+            }
         }
 
         res = requests.post(f"{WP_BASE_URL}/wp/v2/posts", json=payload, auth=(WP_USER, WP_PASS))
         if res.status_code == 201:
-            print(f"✅ PUBLIKUOTA: {politician_name}")
+            print(f"  ✨ SĖKMĖ: {politician_name} publikuotas!")
         else:
-            print(f"❌ WP Klaida: {res.status_code}")
+            print(f"  ❌ WP klaida: {res.status_code} - {res.text}")
             
     except Exception as e:
-        print(f"🚨 Klaida: {e}")
+        print(f"  🚨 Klaida generuojant turinį: {e}")
 
 if __name__ == "__main__":
+    print("🤖 Botas aktyvuotas...")
     if os.path.exists("names.txt"):
         with open("names.txt", "r") as f:
-            names = [line.strip() for line in f if line.strip()]
+            names = [l.strip() for l in f if l.strip()]
         
-        for index, name in enumerate(names, 1):
+        print(f"📚 Rasta vardų: {len(names)}")
+        for i, name in enumerate(names, 1):
             run_wealth_bot(name)
-            if index < len(names):
-                print(f"⏳ ({index}/{len(names)}) Laukiame 5 min...")
+            if i < len(names):
+                print(f"💤 Miegame 5 min. iki kito politiko ({i}/{len(names)})...")
                 time.sleep(300)
+    else:
+        print("❌ Failas names.txt nerastas!")
