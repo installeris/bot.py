@@ -1,6 +1,5 @@
 import os
 import requests
-import google.generativeai as genai
 import json
 import re
 import time
@@ -9,7 +8,7 @@ import sys
 # Priverčiame tekstą pasirodyti GitHub lange iškart
 sys.stdout.reconfigure(line_buffering=True)
 
-print("--- 🏁 BOTAS STARTUOJA (Stable Version) ---")
+print("--- 🏁 BOTAS STARTUOJA (Direct API v1) ---")
 
 # 1. KONFIGŪRACIJA
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
@@ -17,13 +16,12 @@ WP_USER = os.getenv("WP_USERNAME")
 WP_PASS = os.getenv("WP_APP_PASS")
 WP_BASE_URL = "https://politiciannetworth.com/wp-json"
 
+# Gemini API adresas (naudojame STABILIĄ v1 versiją)
+GEMINI_URL = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
+
 if not all([GEMINI_KEY, WP_USER, WP_PASS]):
     print("🚨 KLAIDA: Trūksta GitHub Secrets!")
     sys.exit(1)
-
-# Konfigūruojame Gemini
-genai.configure(api_key=GEMINI_KEY, transport='rest')
-model = genai.GenerativeModel('gemini-1.5-flash-8b')
 
 CAT_MAP = {
     "US Senate": 1, "US House of Representatives": 2, "Executive Branch": 3,
@@ -53,6 +51,17 @@ def upload_to_wp(image_url, politician_name):
     except: return None
     return None
 
+def ask_gemini(prompt):
+    headers = {'Content-Type': 'application/json'}
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}]
+    }
+    response = requests.post(GEMINI_URL, headers=headers, json=payload)
+    if response.status_code == 200:
+        return response.json()['candidates'][0]['content']['parts'][0]['text']
+    else:
+        raise Exception(f"Gemini API klaida: {response.status_code} - {response.text}")
+
 def run_wealth_bot(politician_name):
     print(f"\n💎 Dirbame su: {politician_name}")
     
@@ -66,11 +75,10 @@ def run_wealth_bot(politician_name):
     )
     
     try:
-        print("  🧠 AI generuoja tekstą...")
-        response = model.generate_content(prompt)
+        print("  🧠 AI generuoja tekstą (Direct v1)...")
+        ai_response = ask_gemini(prompt)
         
-        # Išvalome JSON
-        clean_text = re.search(r'\{.*\}', response.text, re.DOTALL)
+        clean_text = re.search(r'\{.*\}', ai_response, re.DOTALL)
         if not clean_text:
             print("  ❌ Klaida: AI nepateikė JSON.")
             return
@@ -87,7 +95,7 @@ def run_wealth_bot(politician_name):
             "acf": {
                 "job_title": data.get("job_title", ""),
                 "net_worth": data.get("net_worth", ""),
-                "source_of_wealth": data.get("wealth_sources", ""),
+                "source_of_wealth": str(data.get("wealth_sources", "")),
                 "main_assets": data.get("main_assets", ""),
                 "net_worth_history": data.get("history", "")
             }
@@ -97,10 +105,10 @@ def run_wealth_bot(politician_name):
         if res.status_code == 201:
             print(f"  ✅ SĖKMĖ: {politician_name} paskelbtas!")
         else:
-            print(f"  ❌ WP Klaida {res.status_code}")
+            print(f"  ❌ WP Klaida {res.status_code}: {res.text}")
             
     except Exception as e:
-        print(f"  🚨 Klaida vykdant užduotį: {e}")
+        print(f"  🚨 Klaida: {e}")
 
 if __name__ == "__main__":
     if os.path.exists("names.txt"):
@@ -111,5 +119,7 @@ if __name__ == "__main__":
         for i, name in enumerate(names, 1):
             run_wealth_bot(name)
             if i < len(names):
-                print(f"⏳ Miegame 5 min... ({i}/{len(names)})")
-                time.sleep(300)
+                print(f"⏳ Miegame 30 sek. (testas)... ")
+                time.sleep(30) # Sutrumpinau testui
+    else:
+        print("🚨 KLAIDA: names.txt nerastas!")
