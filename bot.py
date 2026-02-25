@@ -7,17 +7,38 @@ import sys
 
 sys.stdout.reconfigure(line_buffering=True)
 
-print("--- 🛠️ BOTAS STARTUOJA (Stabilus URL Fix) ---")
+print("--- 🛠️ BOTAS STARTUOJA (Auto-Model Detection Mode) ---")
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 WP_USER = os.getenv("WP_USERNAME")
 WP_PASS = os.getenv("WP_APP_PASS")
 WP_BASE_URL = "https://politiciannetworth.com/wp-json"
 
-# Naudojame stabiliausią modelio ID ir pilną URL formatą
-# Jei gemini-1.5-flash meta klaidą, pakeisk į 'gemini-1.5-flash-latest'
-MODEL_ID = "gemini-1.5-flash"
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_ID}:generateContent?key={GEMINI_KEY}"
+def get_best_model():
+    """Automatiškai randa geriausią prieinamą Flash modelį."""
+    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_KEY}"
+    try:
+        res = requests.get(url).json()
+        if 'models' not in res:
+            print(f"🚨 Klaida gaunant modelius: {res}")
+            return "gemini-1.5-flash" # Fallback
+        
+        available_models = [m['name'] for m in res['models'] if 'generateContent' in m.get('supportedGenerationMethods', [])]
+        
+        # Prioritetų sąrašas
+        for preferred in ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-2.0-flash-exp"]:
+            for available in available_models:
+                if preferred in available:
+                    print(f"✅ Pasirinktas modelis: {available}")
+                    return available
+        return available_models[0]
+    except Exception as e:
+        print(f"⚠️ Nepavyko rasti modelių, naudojamas standartas: {e}")
+        return "models/gemini-1.5-flash"
+
+# Nustatome URL pagal rastą modelį
+SELECTED_MODEL = get_best_model()
+GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/{SELECTED_MODEL}:generateContent?key={GEMINI_KEY}"
 
 WEALTH_OPTIONS = ["Stock Market Investments", "Real Estate Holdings", "Venture Capital", "Professional Law Practice", "Family Inheritance", "Book Deals & Royalties", "Corporate Board Seats", "Consulting Fees", "Hedge Fund Interests", "Cryptocurrency Assets"]
 CAT_MAP = {"US Senate": 1, "US House of Representatives": 2, "Executive Branch": 3, "State Governors": 4, "European Parliament": 18, "United States (USA)": 19, "United Kingdom (UK)": 20, "Germany": 8, "France": 9, "Italy": 10, "Global": 23}
@@ -45,11 +66,11 @@ def run_wealth_bot(politician_name):
     img_id = upload_to_wp(get_wiki_image(politician_name), politician_name)
 
     prompt = (
-        f"Analyze {politician_name} for a net worth article set in 2026. \n"
-        f"1. WEALTH: 2026 estimate (add 8% yearly growth to last known data). \n"
+        f"Research {politician_name} for a net worth article for 2026. \n"
+        f"1. WEALTH: 2026 estimate (8% growth logic if data is old). \n"
         f"2. SOURCES: 2-3 REAL clickable HTML links. \n"
         f"3. SEO: Title and Description for Rank Math. \n"
-        f"Return ONLY clean JSON: {{\"article\": \"HTML\", \"net_worth\": \"$X\", \"job_title\": \"Role\", \"history\": \"2019:X...\", \"sources_html\": \"Links\", \"source_of_wealth\": [], \"key_assets\": \"Assets\", \"seo_title\": \"Title\", \"seo_desc\": \"Desc\", \"cats\": [\"United States (USA)\", \"US Senate\"]}}"
+        f"Return ONLY valid JSON: {{\"article\": \"HTML\", \"net_worth\": \"$X\", \"job_title\": \"Role\", \"history\": \"2019:X...\", \"sources_html\": \"Links\", \"source_of_wealth\": [], \"key_assets\": \"Assets\", \"seo_title\": \"Title\", \"seo_desc\": \"Desc\", \"cats\": [\"United States (USA)\", \"US Senate\"]}}"
     )
     
     try:
@@ -59,8 +80,6 @@ def run_wealth_bot(politician_name):
         })
         
         resp_json = response.json()
-        
-        # Jei vis dar meta 404, išspausdiname visą atsakymą derinimui
         if 'candidates' not in resp_json:
             print(f"  ❌ API Klaida: {resp_json}")
             return
@@ -100,5 +119,5 @@ if __name__ == "__main__":
         for i, name in enumerate(names, 1):
             run_wealth_bot(name)
             if i < len(names):
-                print(f"⏳ Pauzė 75 sek. ({i}/{len(names)})")
+                print(f"⏳ Saugi pauzė (75 sek.)...")
                 time.sleep(75)
