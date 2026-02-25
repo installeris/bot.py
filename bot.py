@@ -7,7 +7,7 @@ import sys
 
 sys.stdout.reconfigure(line_buffering=True)
 
-print("--- 🏁 BOTAS STARTUOJA (ACF CHART & SEO FIX) ---")
+print("--- 🏁 BOTAS STARTUOJA (Image, RankMath & Checkbox Fix) ---")
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 WP_USER = os.getenv("WP_USERNAME")
@@ -37,42 +37,51 @@ CAT_MAP = {
 # --- FUNKCIJOS ---
 def get_wiki_image(name):
     try:
+        # Naudojame oficialų Wikipedia API su User-Agent
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        url = f"https://en.wikipedia.org/w/api.php?action=query&titles={name}&prop=pageimages&format=json&pithumbsize=1000"
+        url = f"https://en.wikipedia.org/w/api.php?action=query&titles={name}&prop=pageimages&format=json&pithumbsize=1200"
         res = requests.get(url, headers=headers).json()
         pages = res.get("query", {}).get("pages", {})
         for pg in pages:
             if "thumbnail" in pages[pg]: return pages[pg]["thumbnail"]["source"]
-    except: return None
+    except Exception as e:
+        print(f"  ⚠️ Nepavyko gauti nuotraukos iš Wiki: {e}")
+    return None
 
 def upload_to_wp(image_url, politician_name):
     if not image_url: return None
     try:
-        img_res = requests.get(image_url, stream=True)
-        headers = {
-            "Content-Disposition": f"attachment; filename={politician_name.replace(' ', '_')}.jpg",
-            "Content-Type": "image/jpeg"
-        }
-        res = requests.post(f"{WP_BASE_URL}/wp/v2/media", data=img_res.content, headers=headers, auth=(WP_USER, WP_PASS))
-        return res.json()["id"] if res.status_code == 201 else None
-    except: return None
+        # Atsisiunčiame nuotrauką į atmintį
+        img_res = requests.get(image_url, headers={'User-Agent': 'Mozilla/5.0'}, stream=True)
+        if img_res.status_code == 200:
+            headers = {
+                "Content-Disposition": f"attachment; filename={politician_name.replace(' ', '_')}.jpg",
+                "Content-Type": "image/jpeg"
+            }
+            res = requests.post(f"{WP_BASE_URL}/wp/v2/media", data=img_res.content, headers=headers, auth=(WP_USER, WP_PASS))
+            if res.status_code == 201:
+                return res.json()["id"]
+    except Exception as e:
+        print(f"  ⚠️ Klaida keliant nuotrauką į WP: {e}")
+    return None
 
 def run_wealth_bot(politician_name):
     print(f"\n💎 Ruošiamas: {politician_name}")
-    img_id = upload_to_wp(get_wiki_image(politician_name), politician_name)
+    
+    wiki_img = get_wiki_image(politician_name)
+    img_id = upload_to_wp(wiki_img, politician_name)
+    if img_id: print(f"  📸 Featured Image įkeltas (ID: {img_id})")
 
-    # Griežtas SEO ir ACF Chart promptas
     prompt = (
-        f"Research {politician_name}. Write an 800-word SEO article. \n"
-        f"1. Generate data for a wealth chart (2019-2025). Format: years and values separated by commas. \n"
-        f"2. Return ONLY JSON: {{"
-        f"\"article\": \"HTML content\", "
-        f"\"net_worth\": \"e.g. $5 Million\", "
-        f"\"job_title\": \"Official role\", "
-        f"\"chart_data\": \"2019,2020,2021,2022,2023,2024,2025|1M,1.2M,1.5M,2M,3M,4M,5M\", "
-        f"\"seo_title\": \"Keyword rich title\", "
-        f"\"seo_desc\": \"Meta description\", "
-        f"\"cats\": [\"United States (USA)\", \"US Senate\"]}}"
+        f"Research current financial data for {politician_name}. Write an 800-word SEO article. \n"
+        f"1. Net worth: Must be a specific string like '$12 Million'. \n"
+        f"2. Source of Wealth: List 1-3 categories (e.g., 'Politics', 'Real Estate', 'Investments'). \n"
+        f"3. Key Assets: List 1-2 main assets. \n"
+        f"4. Rank Math SEO: Provide a meta title and meta description. \n"
+        f"Return ONLY JSON: {{"
+        f"\"article\": \"HTML content\", \"net_worth\": \"$10 Million\", \"job_title\": \"Official Role\", "
+        f"\"source_of_wealth\": [\"Politics\", \"Investments\"], \"key_assets\": \"Real Estate in DC\", "
+        f"\"seo_title\": \"SEO Title\", \"seo_desc\": \"Meta Description\", \"cats\": [\"United States (USA)\", \"US Senate\"]}}"
     )
     
     try:
@@ -82,32 +91,34 @@ def run_wealth_bot(politician_name):
 
         cat_ids = [CAT_MAP[c] for c in data.get("cats", []) if c in CAT_MAP]
 
-        # WordPress POST paketas
+        # WordPress užklausa
         payload = {
             "title": f"{politician_name} Net Worth",
             "content": data["article"],
             "status": "publish",
             "categories": cat_ids,
             "featured_media": img_id,
-            # ACF LAUKAI (Pataisyk 'wealth_chart' pagal savo tikrąjį ACF slug!)
             "acf": {
                 "job_title": data.get("job_title", ""),
                 "net_worth": data.get("net_worth", ""),
-                "wealth_chart": data.get("chart_data", ""), # <--- TAVO CHARTO LAUKAS
-                "main_assets": "Investments, Real Estate, Salary"
+                "source_of_wealth": data.get("source_of_wealth", []), # Masyvas checkbox'ui
+                "main_assets": data.get("key_assets", ""),
             },
             "meta": {
-                "_yoast_wpseo_title": data.get("seo_title", ""),
-                "_yoast_wpseo_metadesc": data.get("seo_desc", ""),
+                # Rank Math laukai
                 "rank_math_title": data.get("seo_title", ""),
-                "rank_math_description": data.get("seo_desc", "")
+                "rank_math_description": data.get("seo_desc", ""),
+                "rank_math_focus_keyword": f"{politician_name} net worth",
+                # Yoast (atsargai)
+                "_yoast_wpseo_title": data.get("seo_title", ""),
+                "_yoast_wpseo_metadesc": data.get("seo_desc", "")
             }
         }
 
         res = requests.post(f"{WP_BASE_URL}/wp/v2/posts", json=payload, auth=(WP_USER, WP_PASS))
         
         if res.status_code == 201:
-            print(f"  ✅ SĖKMĖ: {politician_name} publikuotas! (Image ID: {img_id})")
+            print(f"  ✅ SĖKMĖ: {politician_name} publikuotas!")
         else:
             print(f"  ❌ WP Klaida: {res.text}")
 
