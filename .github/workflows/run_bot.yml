@@ -1,26 +1,16 @@
 name: Politician Wealth Bot
-
 on:
-  workflow_dispatch: # Leidžia paleisti rankiniu būdu
-
+  workflow_dispatch:
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
-
-      - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-
-      - name: Run bot
-        env:
+          python-version: '3.11' # ČIA PAKEISK Į 3.11
+      - run: pip install requests google-genai
+      - env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           WP_USERNAME: ${{ secrets.WP_USERNAME }}
           WP_APP_PASS: ${{ secrets.WP_APP_PASS }}
