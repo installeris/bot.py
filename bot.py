@@ -7,7 +7,7 @@ import sys
 
 sys.stdout.reconfigure(line_buffering=True)
 
-print("--- 🏁 BOTAS STARTUOJA (Galutinis SEO & Wealth Sync) ---")
+print("--- 🏁 BOTAS STARTUOJA (Stability & RankMath Fix) ---")
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 WP_USER = os.getenv("WP_USERNAME")
@@ -59,24 +59,43 @@ def upload_to_wp(image_url, politician_name):
     except: return None
 
 def run_wealth_bot(politician_name):
-    print(f"\n💎 Ruošiamas: {politician_name}")
+    print(f"\n💎 Analizuojamas: {politician_name}")
     img_id = upload_to_wp(get_wiki_image(politician_name), politician_name)
 
     prompt = (
-        f"Analyze {politician_name} for a 2026 net worth article. \n"
-        f"1. WEALTH LOGIC: Research their 2018-2024 financial disclosures. If data is old, estimate 2026 value by adding 8% annual growth to their last known wealth. Total net worth must be realistic (e.g., John Barrasso should be ~$12M-$16M in 2026). \n"
-        f"2. SOURCES: Find 2-3 real external URLs (OpenSecrets, Forbes, etc.) and return them as HTML links. \n"
-        f"3. SEO: Create a focus-keyword rich Title and Meta Description. \n"
-        f"Return ONLY JSON: {{"
-        f"\"article\": \"HTML\", \"net_worth\": \"$15,200,000\", \"job_title\": \"Role\", "
-        f"\"history\": \"2019:8500000,2020:9200000...\", \"sources_html\": \"HTML links\", "
-        f"\"source_of_wealth\": [], \"key_assets\": \"1-2 items\", "
-        f"\"seo_title\": \"SEO Title\", \"seo_desc\": \"Meta Description\", \"cats\": [\"United States (USA)\", \"US Senate\"]}}"
+        f"Research {politician_name} for a net worth article. \n"
+        f"1. WEALTH: Use financial disclosures. If data is old, calculate 2026 value with 8% annual growth. Be realistic. \n"
+        f"2. SOURCES: Return 2-3 real URLs as HTML links. \n"
+        f"3. SEO: Title and Meta Description for Rank Math. \n"
+        f"Return ONLY valid JSON: {{"
+        f"\"article\": \"HTML content\", \"net_worth\": \"$15M\", \"job_title\": \"Role\", "
+        f"\"history\": \"2019:8M,2020:9M...\", \"sources_html\": \"HTML links\", "
+        f"\"source_of_wealth\": [], \"key_assets\": \"Asset names\", "
+        f"\"seo_title\": \"Title\", \"seo_desc\": \"Description\", \"cats\": [\"United States (USA)\", \"US Senate\"]}}"
     )
     
     try:
-        response = requests.post(GEMINI_URL, json={"contents": [{"parts": [{"text": prompt}]}]})
-        ai_text = response.json()['candidates'][0]['content']['parts'][0]['text']
+        # Pridėti saugos nustatymai, kad API neblokuotų užklausos
+        safety_settings = [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+        ]
+        
+        response = requests.post(GEMINI_URL, json={
+            "contents": [{"parts": [{"text": prompt}]}],
+            "safetySettings": safety_settings
+        })
+        
+        resp_json = response.json()
+        
+        # Patikra ar 'candidates' egzistuoja
+        if 'candidates' not in resp_json:
+            print(f"  ❌ API Klaida (Nėra kandidatų): {resp_json.get('error', {}).get('message', 'Blokuota saugos filtrų')}")
+            return
+
+        ai_text = resp_json['candidates'][0]['content']['parts'][0]['text']
         data = json.loads(re.search(r'\{.*\}', ai_text, re.DOTALL).group())
 
         valid_sources = [s for s in data.get("source_of_wealth", []) if s in WEALTH_OPTIONS]
@@ -96,21 +115,19 @@ def run_wealth_bot(politician_name):
                 "main_assets": data.get("key_assets", ""),
                 "sources": data.get("sources_html", "")
             },
-            # Šie laukai dabar veiks per Rank Math API Manager įskiepį
             "rank_math_title": data.get("seo_title", ""),
             "rank_math_description": data.get("seo_desc", ""),
             "rank_math_focus_keyword": f"{politician_name} net worth"
         }
 
         res = requests.post(f"{WP_BASE_URL}/wp/v2/posts", json=payload, auth=(WP_USER, WP_PASS))
-        
         if res.status_code == 201:
-            print(f"  ✅ SĖKMĖ: {politician_name} publikuotas su SEO ir History!")
+            print(f"  ✅ SĖKMĖ: {politician_name} paskelbtas!")
         else:
             print(f"  ❌ WP Klaida: {res.text}")
 
     except Exception as e:
-        print(f"  🚨 Klaida: {e}")
+        print(f"  🚨 Kritinė klaida: {e}")
 
 if __name__ == "__main__":
     if os.path.exists("names.txt"):
