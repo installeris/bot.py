@@ -10,7 +10,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install dependencies
-        run: pip install requests google-genai
+        run: pip install requests google-generativeai
       - name: Run bot
         env:
           PYTHONUNBUFFERED: "1" # Svarbu: rodo tekstą gyvai
