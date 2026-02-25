@@ -7,19 +7,18 @@ import sys
 
 sys.stdout.reconfigure(line_buffering=True)
 
-print("--- 💎 KOKYBIŠKO TURINIO BOTAS (Paid Tier) ---")
+print("--- 💎 KOKYBIŠKO TURINIO BOTAS (Unfiltered Mode) ---")
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 WP_USER = os.getenv("WP_USERNAME")
 WP_PASS = os.getenv("WP_APP_PASS")
 WP_BASE_URL = "https://politiciannetworth.com/wp-json"
 
-# Nustatymai
+# Kategorijų ID iš tavo svetainės
 CAT_MAP = {"US Senate": 1, "US House of Representatives": 2, "Executive Branch": 3, "State Governors": 4, "United States (USA)": 19}
 WEALTH_OPTIONS = ["Stock Market Investments", "Real Estate Holdings", "Venture Capital", "Professional Law Practice", "Family Inheritance"]
 
 def get_wiki_image(name):
-    """Randa aukštos kokybės nuotrauką iš Wikipedia."""
     try:
         url = f"https://en.wikipedia.org/w/api.php?action=query&titles={name}&prop=pageimages&format=json&pithumbsize=1000"
         res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).json()
@@ -29,7 +28,6 @@ def get_wiki_image(name):
     except: return None
 
 def upload_to_wp(image_url, politician_name):
-    """Įkelia nuotrauką į WP Media Library."""
     if not image_url: return None
     try:
         img_res = requests.get(image_url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -40,29 +38,45 @@ def upload_to_wp(image_url, politician_name):
 
 def run_wealth_bot(politician_name):
     print(f"\n🚀 Ruošiamas pilnas straipsnis: {politician_name}")
-    
-    # 1. Nuotrauka
     img_id = upload_to_wp(get_wiki_image(politician_name), politician_name)
 
-    # 2. Kokybiškas Promptas
+    # Maksimaliai detalus promptas kokybei
     prompt = (
-        f"Write a detailed, 800-word SEO-optimized financial biography for {politician_name} in 2026. \n"
-        f"1. ARTICLE: Use H2/H3 tags. Discuss career, wealth sources, and recent 2024-2025 financial trends. \n"
-        f"2. NET WORTH: Be precise (e.g., $15,400,000, not 15.4). If old data, apply 8% annual growth. \n"
-        f"3. CHART: Create 'net_worth_history' string (e.g., '2020:10000000,2021:11000000,2026:15400000'). \n"
-        f"4. CATEGORIES: Pick from: {list(CAT_MAP.keys())}. \n"
+        f"Write a long-form professional financial article (min 800 words) about {politician_name} for 2026. \n"
+        f"1. ARTICLE: Use H2 and H3 headings. Detailed career path, investment analysis, and net worth breakdown. \n"
+        f"2. DATA: Net worth must be a full number like '$15,400,000'. History format: '2020:10000000,2022:12000000,2026:15400000'. \n"
+        f"3. LINKS: Include 2-3 REAL source links as HTML <a> tags. \n"
+        f"4. CATEGORIES: Choose from {list(CAT_MAP.keys())}. \n"
         f"Return ONLY JSON: {{"
-        f"\"article\": \"HTML content\", \"net_worth\": \"$XX,XXX,XXX\", \"job_title\": \"Title\", "
-        f"\"history\": \"2020:X,2026:Y\", \"sources_html\": \"<a href='...'>Source</a>\", "
-        f"\"source_of_wealth\": [\"Real Estate Holdings\"], \"key_assets\": \"Specific assets\", "
-        f"\"seo_title\": \"Title\", \"seo_desc\": \"Desc\", \"cats\": [\"United States (USA)\", \"US Senate\"]}}"
+        f"\"article\": \"Full HTML\", \"net_worth\": \"$XX,XXX,XXX\", \"job_title\": \"Title\", "
+        f"\"history\": \"2020:X,2026:Y\", \"sources_html\": \"Sources\", \"source_of_wealth\": [], "
+        f"\"key_assets\": \"Specific assets\", \"seo_title\": \"SEO Title\", \"seo_desc\": \"Desc\", \"cats\": []}}"
     )
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
+    # Naudojame naujausią stabilią versiją
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_KEY}"
     
+    # Saugumo nustatymai - išjungiam blokavimą
+    safety_settings = [
+        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+    ]
+
     try:
-        response = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"response_mime_type": "application/json"}})
-        data = json.loads(response.json()['candidates'][0]['content']['parts'][0]['text'])
+        response = requests.post(url, json={
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"response_mime_type": "application/json"},
+            "safetySettings": safety_settings
+        })
+        
+        resp_json = response.json()
+        if 'candidates' not in resp_json:
+            print(f"  ❌ API Klaida: {resp_json}")
+            return
+
+        data = json.loads(resp_json['candidates'][0]['content']['parts'][0]['text'])
 
         payload = {
             "title": f"{politician_name} Net Worth",
@@ -79,11 +93,15 @@ def run_wealth_bot(politician_name):
                 "sources": data.get("sources_html", "")
             },
             "rank_math_title": data.get("seo_title", ""),
-            "rank_math_description": data.get("seo_desc", "")
+            "rank_math_description": data.get("seo_desc", ""),
+            "rank_math_focus_keyword": f"{politician_name} net worth"
         }
 
         res = requests.post(f"{WP_BASE_URL}/wp/v2/posts", json=payload, auth=(WP_USER, WP_PASS))
-        print(f"  ✅ SĖKMĖ: {politician_name} (ID: {res.json().get('id')})")
+        if res.status_code == 201:
+            print(f"  ✅ SĖKMĖ: {politician_name} paskelbtas!")
+        else:
+            print(f"  ❌ WP Klaida: {res.text}")
 
     except Exception as e:
         print(f"  🚨 Klaida: {e}")
