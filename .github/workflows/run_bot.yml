@@ -14,4 +14,6 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           WP_USERNAME: ${{ secrets.WP_USERNAME }}
           WP_APP_PASS: ${{ secrets.WP_APP_PASS }}
-        run: python bot.py
+       run: |
+          ls -R # Ši eilutė parodys mums visus failus, jei vėl užstrigs
+          python bot.py
