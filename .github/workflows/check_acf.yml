@@ -1,0 +1,20 @@
+name: Check Future ACF
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install requests
+      - name: Check ACF
+        env:
+          PYTHONUNBUFFERED: "1"
+          WP_USERNAME: ${{ secrets.WP_USERNAME }}
+          WP_APP_PASS: ${{ secrets.WP_APP_PASS }}
+        run: python check_future_acf.py
