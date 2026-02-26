@@ -4,16 +4,21 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
         with:
           python-version: '3.11'
       - name: Install dependencies
-        run: pip install requests google-generativeai
+        run: pip install requests
+      - name: Check Gemini models
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python check_models.py
       - name: Run bot
         env:
-          PYTHONUNBUFFERED: "1" # Svarbu: rodo tekstą gyvai
+          PYTHONUNBUFFERED: "1"
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           WP_USERNAME: ${{ secrets.WP_USERNAME }}
           WP_APP_PASS: ${{ secrets.WP_APP_PASS }}
