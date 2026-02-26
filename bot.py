@@ -114,6 +114,11 @@ def upload_image_to_wp(name, img_url):
 # ── Gemini užklausa ───────────────────────────────────────────────────────────
 def call_gemini_with_retry(prompt, model_url, retries=4):
     delay = 15
+    # Bandome abu URL variantus: v1beta ir v1
+    urls_to_try = [
+        model_url,
+        model_url.replace("/v1beta/", "/v1/"),
+    ]
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
@@ -292,8 +297,23 @@ if __name__ == "__main__":
     # Automatiškai randame veikiantį modelį
     print("\n🔍 Ieškome geriausio Gemini modelio...")
     best_model = detect_best_model()
-    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{best_model}:generateContent?key={GEMINI_KEY}"
-    print(f"🤖 Modelis: {best_model}\n")
+    gemini_url = None
+    for version in ["v1beta", "v1"]:
+        test_url = f"https://generativelanguage.googleapis.com/{version}/models/{best_model}:generateContent?key={GEMINI_KEY}"
+        try:
+            r = requests.post(test_url, json={"contents": [{"parts": [{"text": "Hi"}]}]}, timeout=15)
+            print(f"  URL test {version} -> {r.status_code}")
+            if r.status_code != 404:
+                gemini_url = test_url
+                print(f"  Naudosime versija: {version}")
+                break
+        except Exception as e:
+            print(f"  Klaida {version}: {e}")
+    if not gemini_url:
+        print("Nepavyko rasti veikiancio Gemini URL!")
+        sys.exit(1)
+    print(f"Modelis: {best_model}")
+    print()
 
     with open("names.txt", "r") as f:
         names = [n.strip() for n in f if n.strip()]
