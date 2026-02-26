@@ -409,29 +409,51 @@ def post_to_wp(name, data, img_id):
 def build_prompt(name):
     cats_list = ", ".join(CAT_MAP.keys())
     wealth_list = ", ".join(WEALTH_OPTIONS)
-    return f"""You are a financial researcher writing for politiciannetworth.com.
+    return f"""You are a financial researcher. Your job is to find REAL, ACCURATE information about {name} and write a financial profile.
 
-Write a 700-900 word article about {name}'s estimated net worth in 2026.
+DO NOT use placeholder values. DO NOT copy example values. Every field must be based on real research.
 
-RESEARCH INSTRUCTIONS:
-- Cross-reference multiple sources: OpenSecrets, Ballotpedia, official financial disclosures, Forbes, Reuters, AP News, Roll Call, quiverquant.com, disclosures-clerk.house.gov.
-- net_worth: best estimate as a plain integer (no $ sign, no M/K/B). Example: 2300000 for $2.3M, 410000 for $410K.
-- history: realistic yearly estimates 2022-2026 as plain integers. Format: "2022:1200000,2023:1500000,2024:1800000,2025:2000000,2026:2300000"
-- wealth_sources: carefully analyze their background and income. Pick MAX 2 from this exact list: [{wealth_list}]
-- assets: ONE sentence. Name the 1-2 most important asset types only.
-- cats: pick 1-2 from: [{cats_list}]
-- urls: 2-3 real working URLs. Use these sources where relevant: opensecrets.org, ballotpedia.org, disclosures-clerk.house.gov, quiverquant.com, senate.gov, house.gov, parliament.uk, europarl.europa.eu
-- seo_title: under 60 chars. Example: "{name} Net Worth 2026"
+STEP 1 - RESEARCH {name}:
+- Find their actual job title (Senator, Congressman, Prime Minister, CEO, MEP, etc.)
+- Find their actual net worth from: OpenSecrets, Ballotpedia, Forbes, financial disclosures, Reuters, AP, Roll Call, quiverquant.com, disclosures-clerk.house.gov
+- Find their actual main income sources and assets
+- Find their actual political chamber/country to assign correct category
 
-ARTICLE STYLE:
-- Simple, human language. Do NOT sound like AI.
-- Add 1-2 interesting lesser-known personal facts.
-- Use <h2> and <h3> HTML tags. Bold key numbers with <strong>.
-- 700-900 words.
+STEP 2 - FILL THESE FIELDS with REAL data:
+
+net_worth: their actual estimated net worth as plain integer dollars. 
+  Examples: 2300000 = $2.3M, 410000 = $410K, 1500000000 = $1.5B
+  This MUST be their real estimated net worth, not a placeholder.
+
+job_title: their REAL current job title. Examples: "U.S. Senator", "Member of Parliament", "MEP", "State Governor", "Prime Minister", "CEO"
+
+history: their REAL estimated net worth for each year 2022-2026 as plain integers.
+  These numbers MUST vary realistically based on actual financial disclosure trends.
+  Format: "2022:INTEGER,2023:INTEGER,2024:INTEGER,2025:INTEGER,2026:INTEGER"
+  Example for someone worth $2.3M: "2022:1600000,2023:1900000,2024:2100000,2025:2200000,2026:2300000"
+  Example for someone worth $50M: "2022:35000000,2023:40000000,2024:44000000,2025:47000000,2026:50000000"
+
+wealth_sources: analyze HOW this specific person actually made their money.
+  Pick 1-2 that TRULY apply to THIS person from this list: [{wealth_list}]
+  Think carefully - a lawyer turned senator picks "Professional Law Practice", a tech investor picks "Stock Market Investments", someone with inherited money picks "Family Inheritance".
+
+assets: ONE sentence describing THIS person's actual main assets. Be specific. Example: "Primary home in Wisconsin and a diversified mutual fund portfolio." NOT a generic description.
+
+cats: pick 1-2 categories that match THIS person's actual role and country: [{cats_list}]
+
+urls: 2-3 real working URLs for THIS person from: opensecrets.org, ballotpedia.org, disclosures-clerk.house.gov, quiverquant.com, senate.gov, house.gov, parliament.uk, europarl.europa.eu
+
+seo_title: "{name} Net Worth 2026" (under 60 chars)
+
+STEP 3 - WRITE the article:
+- 700-900 words about {name} specifically
+- Simple language, not AI-sounding
+- Add 1-2 interesting lesser-known personal facts about {name}
+- Use <h2> and <h3> HTML tags, bold key numbers with <strong>
 
 Return ONLY valid JSON. No markdown. No extra text. No trailing commas.
 
-{{"article":"<h2>...</h2><p>...</p>","net_worth":"2300000","job_title":"U.S. Senator","history":"2022:1800000,2023:2000000,2024:2100000,2025:2200000,2026:2300000","urls":["https://www.opensecrets.org/personal-finances/...","https://ballotpedia.org/..."],"wealth_sources":["Real Estate Holdings","Stock Market Investments"],"assets":"Primary residence and investment portfolio.","seo_title":"{name} Net Worth 2026","cats":["US Senate"]}}"""
+{{"article":"<h2>...</h2><p>...</p>","net_worth":"REAL_INTEGER","job_title":"REAL_JOB_TITLE","history":"2022:REAL_INT,2023:REAL_INT,2024:REAL_INT,2025:REAL_INT,2026:REAL_INT","urls":["REAL_URL_1","REAL_URL_2"],"wealth_sources":["REAL_SOURCE_1"],"assets":"One specific sentence about their actual assets.","seo_title":"{name} Net Worth 2026","cats":["REAL_CATEGORY"]}}"""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
