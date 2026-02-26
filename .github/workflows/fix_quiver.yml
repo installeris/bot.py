@@ -1,0 +1,21 @@
+name: Fix QuiverQuant URLs
+on:
+  workflow_dispatch:
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install requests
+      - name: Fix QuiverQuant URLs
+        env:
+          PYTHONUNBUFFERED: "1"
+          WP_USERNAME: ${{ secrets.WP_USERNAME }}
+          WP_APP_PASS: ${{ secrets.WP_APP_PASS }}
+        run: python fix_quiver_urls.py
