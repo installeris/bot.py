@@ -15,7 +15,7 @@ WP_PASS     = os.getenv("WP_APP_PASS")
 WP_BASE_URL = "https://politiciannetworth.com/wp-json"
 
 # Autorius "Financial Research Team" - rask WP Admin -> Users -> ID
-AUTHOR_ID      = 3   # <- pakeisk i tikra "Financial Research Team" vartotojo ID
+AUTHOR_ID      = 1   # <- pakeisk i tikra "Financial Research Team" vartotojo ID
 WP_TIMEOUT     = 30
 IMG_TIMEOUT    = 20
 GEMINI_TIMEOUT = 120
@@ -312,23 +312,15 @@ def resolve_categories(cat_names):
     return list(cat_ids)
 
 
-def build_seo_desc(name, job_title, net_worth_raw):
+def build_seo_desc(name, job_title, seo_desc_from_gemini=""):
     """
-    Unikalus SEO description iki 160 simbolių.
-    Kiekvienas politikas gauna skirtingą tekstą.
+    Naudojame Gemini sugeneruotą description.
+    Fallback - generuojame iš vardo ir pareigų.
     """
-    num = parse_to_int(net_worth_raw)
-    if num >= 1_000_000_000:
-        worth_str = f"${num/1_000_000_000:.1f}B"
-    elif num >= 1_000_000:
-        worth_str = f"${num/1_000_000:.1f}M"
-    elif num >= 1_000:
-        worth_str = f"${num/1_000:.0f}K"
-    else:
-        worth_str = "millions"
-
-    desc = f"{name}, {job_title}, has an estimated net worth of {worth_str} in 2026. Explore their assets, income sources, and full financial breakdown."
-    return desc[:160]
+    if seo_desc_from_gemini and len(seo_desc_from_gemini) > 50:
+        return seo_desc_from_gemini[:160]
+    # Fallback jei Gemini negrąžino
+    return f"Explore {name}'s financial profile as {job_title} in 2026. Full breakdown of assets, career earnings, and wealth sources inside."[:160]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -353,7 +345,7 @@ def post_to_wp(name, data, img_id):
     job_title = data.get("job_title", "")
 
     seo_title = data.get("seo_title", f"{name} Net Worth 2026")[:60]
-    seo_desc  = build_seo_desc(name, job_title, data.get("net_worth", "0"))
+    seo_desc  = build_seo_desc(name, job_title, data.get("seo_desc", ""))
     focus_kw  = f"{name} Net Worth 2026"
 
     print(f"    SEO desc ({len(seo_desc)} chars): {seo_desc}")
@@ -364,13 +356,22 @@ def post_to_wp(name, data, img_id):
         job_title,
         net_worth
     )
+
     full_article = data["article"] + refs_html
+
+    # Scheduling - pirmas straipsnis po 30 min, kiekvienas sekantis +30 min
+    from datetime import datetime, timezone, timedelta
+    post_num = stats["ok"] + stats["fail"] + stats["skip"] + 1
+    schedule_time = datetime.now(timezone.utc) + timedelta(minutes=20 * post_num)
+    schedule_str = schedule_time.strftime("%Y-%m-%dT%H:%M:%S")
+    print(f"    Suplanuota: {schedule_str}")
 
     payload = {
         "title":          f"{name} Net Worth 2026",
         "slug":           make_slug(name),
         "content":        full_article,
-        "status":         "publish",
+        "status":         "future",
+        "date":           schedule_str,
         "author":         AUTHOR_ID,
         "featured_media": img_id,
         "categories":     cats,
@@ -397,9 +398,10 @@ def post_to_wp(name, data, img_id):
                 json=payload, auth=(WP_USER, WP_PASS), timeout=WP_TIMEOUT
             )
             print(f"    [4/4] WP atsake: {wp_res.status_code}")
-            if wp_res.status_code == 201:
+            if wp_res.status_code in (201, 202):
                 resp = wp_res.json()
-                print(f"    [4/4] Ikeltas! {resp.get('link','')} | slug: {resp.get('slug','')}")
+                sched = resp.get("date", "")
+                print(f"    [4/4] Suplanuotas! {resp.get('link','')} | {sched}")
                 return True
             elif wp_res.status_code in (500, 502, 503, 504):
                 print(f"    [4/4] WP serverio klaida. Laukiam {10*(attempt+1)}s...")
@@ -495,9 +497,17 @@ assets: ONE sentence describing THIS person's actual main assets. Be specific. E
 
 cats: pick 1-2 categories that match THIS person's actual role and country: [{cats_list}]
 
-urls: 2-3 real working URLs for THIS person from: opensecrets.org, ballotpedia.org, disclosures-clerk.house.gov, quiverquant.com, senate.gov, house.gov, parliament.uk, europarl.europa.eu
+urls: 2-4 real working URLs for THIS person. Use the most relevant from: opensecrets.org, ballotpedia.org, disclosures-clerk.house.gov, quiverquant.com, senate.gov, house.gov, parliament.uk, europarl.europa.eu, forbes.com, reuters.com, apnews.com, theyworkforyou.com. Pick sources that actually have data on this specific person - do not include generic homepages.
 
 seo_title: "{name} Net Worth 2026" (under 60 chars)
+seo_desc: 120-155 char unique meta description for THIS specific person. Rules:
+  * Do NOT mention the exact net worth number
+  * Must be unique - reflect something specific about this person's background
+  * Focus on what makes their financial story interesting
+  * Good examples:
+    "From orthopedic surgeon to U.S. Senator - explore John Barrasso's investments, real estate, and wealth sources in 2026."
+    "How did Tammy Baldwin build her finances through decades of public service? Career earnings and assets explored."
+    "MEP and businessman - discover the financial portfolio and income sources of [name] in 2026."
 
 STEP 3 - WRITE the article:
 - 700-900 words about {name} specifically
@@ -507,7 +517,7 @@ STEP 3 - WRITE the article:
 
 Return ONLY valid JSON. No markdown. No extra text. No trailing commas.
 
-{{"article":"<h2>...</h2><p>...</p>","net_worth":"REAL_INTEGER","job_title":"REAL_JOB_TITLE","history":"2022:REAL_INT,2023:REAL_INT,2024:REAL_INT,2025:REAL_INT,2026:REAL_INT","urls":["REAL_URL_1","REAL_URL_2"],"wealth_sources":["REAL_SOURCE_1"],"assets":"One specific sentence about their actual assets.","seo_title":"{name} Net Worth 2026","cats":["REAL_CATEGORY"]}}"""
+{{"article":"<h2>...</h2><p>...</p>","net_worth":"REAL_INTEGER","job_title":"REAL_JOB_TITLE","history":"2022:REAL_INT,2023:REAL_INT,2024:REAL_INT,2025:REAL_INT,2026:REAL_INT","urls":["REAL_URL_1","REAL_URL_2"],"wealth_sources":["REAL_SOURCE_1"],"assets":"One specific sentence about their actual assets.","seo_title":"{name} Net Worth 2026","seo_desc":"Unique description without net worth amount, 120-155 chars","cats":["REAL_CATEGORY"]}}"""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
