@@ -12,10 +12,6 @@ jobs:
           python-version: '3.11'
       - name: Install dependencies
         run: pip install requests
-      - name: Check Gemini models
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: python check_models.py
       - name: Run bot
         env:
           PYTHONUNBUFFERED: "1"
