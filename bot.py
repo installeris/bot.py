@@ -16,7 +16,7 @@ WP_BASE_URL = "https://politiciannetworth.com/wp-json"
 
 WP_TIMEOUT     = 30
 IMG_TIMEOUT    = 20
-GEMINI_TIMEOUT = 90
+GEMINI_TIMEOUT = 120
 
 # ── Pilnas wealth options sąrašas ─────────────────────────────────────────────
 WEALTH_OPTIONS = [
@@ -184,7 +184,7 @@ def call_gemini(prompt, gemini_url, retries=4):
     delay = 15
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 8192},
+        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 16384},
         "safetySettings": [
             {"category": c, "threshold": "BLOCK_NONE"}
             for c in ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH",
@@ -475,8 +475,14 @@ def run_wealth_bot(politician_name, gemini_url):
         return
 
     try:
-        full_text = res["candidates"][0]["content"]["parts"][0]["text"]
-        print(f"    Atsakymo ilgis: {len(full_text)} simboliu")
+        candidate = res["candidates"][0]
+        finish_reason = candidate.get("finishReason", "UNKNOWN")
+        full_text = candidate["content"]["parts"][0]["text"]
+        print(f"    Atsakymo ilgis: {len(full_text)} simboliu, finishReason: {finish_reason}")
+        if finish_reason == "MAX_TOKENS":
+            print("    PERSPEJIMAS: Gemini nupjove atsakyma! Bandome dar karta...")
+            stats["fail"] += 1
+            return
         data = parse_json(full_text)
     except Exception as e:
         print(f"  JSON klaida: {e}")
