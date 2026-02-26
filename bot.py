@@ -32,12 +32,9 @@ stats = {"ok": 0, "fail": 0, "skip": 0}
 
 def find_gemini_url():
     preferred = [
-        "gemini-2.0-flash-001",
-        "gemini-2.0-flash-lite-001",
-        "gemini-2.0-flash-lite",
-        "gemini-2.0-flash",
-        "gemini-flash-latest",
-        "gemini-1.5-flash",
+        "gemini-2.0-flash-001", "gemini-2.0-flash-lite-001",
+        "gemini-2.0-flash-lite", "gemini-2.0-flash",
+        "gemini-flash-latest", "gemini-1.5-flash",
     ]
     print("  Gauname modeliu sarasa...")
     try:
@@ -52,23 +49,14 @@ def find_gemini_url():
         ]
         print(f"  Rasti modeliai: {available}")
     except Exception as e:
-        print(f"  Klaida gaunant sarasa: {e}")
+        print(f"  Klaida: {e}")
         available = []
 
-    chosen = None
-    for p in preferred:
-        if p in available:
-            chosen = p
-            break
+    chosen = next((p for p in preferred if p in available), None)
     if not chosen:
-        for m in available:
-            if "flash" in m.lower():
-                chosen = m
-                break
-    if not chosen:
-        chosen = "gemini-2.0-flash-001"
+        chosen = next((m for m in available if "flash" in m.lower()), "gemini-2.0-flash-001")
+    print(f"  Bandysime: {chosen}")
 
-    print(f"  Bandysime modeli: {chosen}")
     test_payload = {"contents": [{"parts": [{"text": "Hi"}]}]}
     for version in ["v1beta", "v1"]:
         url = f"https://generativelanguage.googleapis.com/{version}/models/{chosen}:generateContent?key={GEMINI_KEY}"
@@ -76,24 +64,22 @@ def find_gemini_url():
             r = requests.post(url, json=test_payload, timeout=20)
             print(f"  {version} -> {r.status_code}")
             if r.status_code in (200, 400):
-                print(f"  Naudosime: {version}")
                 return url
         except Exception as e:
             print(f"  {version} klaida: {e}")
 
-    print("  Bandome visus galimus modelius...")
     for model in available[:8]:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_KEY}"
         try:
             r = requests.post(url, json=test_payload, timeout=20)
             print(f"  {model} -> {r.status_code}")
             if r.status_code in (200, 400):
-                print(f"  Rastas veikiantis: {model}")
+                print(f"  Rastas: {model}")
                 return url
-        except Exception as e:
-            print(f"  {model}: {e}")
+        except:
+            pass
 
-    print("KLAIDA: Nepavyko rasti veikiancio Gemini URL!")
+    print("KLAIDA: Nepavyko rasti Gemini URL!")
     sys.exit(1)
 
 
@@ -144,16 +130,11 @@ def call_gemini(prompt, gemini_url, retries=4):
     delay = 15
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature": 0.4,
-            "maxOutputTokens": 8192
-        },
+        "generationConfig": {"temperature": 0.4, "maxOutputTokens": 8192},
         "safetySettings": [
             {"category": c, "threshold": "BLOCK_NONE"}
-            for c in [
-                "HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH",
-                "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"
-            ]
+            for c in ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH",
+                      "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]
         ]
     }
     for i in range(retries):
@@ -164,7 +145,6 @@ def call_gemini(prompt, gemini_url, retries=4):
             elapsed = round(time.time() - t0, 1)
             print(f"    [3/4] Atsake per {elapsed}s - statusas: {response.status_code}")
             if response.status_code == 200:
-                print("    [3/4] Gemini OK")
                 return response.json()
             elif response.status_code in (429, 503):
                 print(f"    [3/4] Rate limit. Laukiam {delay}s...")
@@ -180,14 +160,14 @@ def call_gemini(prompt, gemini_url, retries=4):
         except Exception as e:
             print(f"    [3/4] Iskimtis: {e}")
             break
-    print("    [3/4] Visi Gemini bandymai nepavyko")
+    print("    [3/4] Visi bandymai nepavyko")
     return None
 
 
 def parse_json(text):
-    for attempt in [text, text.strip()]:
+    for t in [text, text.strip()]:
         try:
-            return json.loads(attempt)
+            return json.loads(t)
         except:
             pass
     md = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
@@ -196,57 +176,140 @@ def parse_json(text):
             return json.loads(md.group(1))
         except:
             pass
-    start = text.find('{')
-    end = text.rfind('}')
-    if start != -1 and end != -1:
+    s, e = text.find('{'), text.rfind('}')
+    if s != -1 and e != -1:
         try:
-            return json.loads(text[start:end+1])
+            return json.loads(text[s:e+1])
         except:
             pass
     raise ValueError(f"Nepavyko parsinuoti JSON. Pradzia: {text[:300]}")
 
 
+def make_slug(name):
+    """Sukuria SEO slug: pvz. 'Tammy Baldwin' -> 'tammy-baldwin-net-worth'"""
+    slug = name.lower().strip()
+    slug = re.sub(r"[^a-z0-9\s-]", "", slug)
+    slug = re.sub(r"\s+", "-", slug)
+    return f"{slug}-net-worth"
+
+
 def format_sources_html(urls):
-    """Grazus saltiniai su domeno pavadinimu kaip tekstu."""
+    """
+    Svarbu: sources laukelis turi buti tik plain HTML <ul><li>...,
+    nes WP custom field rodo ji kaip HTML. Naudojame domeno pavadinima
+    kaip anchor teksta.
+    """
     items = []
     for url in urls:
-        # Isimame domeno pavadinima kaip display teksta
         domain = re.sub(r"https?://(www\.)?", "", url).split("/")[0]
-        items.append(f'<li><a href="{url}" target="_blank" rel="nofollow noopener">{domain}</a></li>')
+        label = domain.replace("opensecrets.org", "OpenSecrets") \
+                      .replace("ballotpedia.org", "Ballotpedia") \
+                      .replace("senate.gov", "U.S. Senate") \
+                      .replace("house.gov", "U.S. House") \
+                      .replace("forbes.com", "Forbes")
+        items.append(f'<li><a href="{url}" target="_blank" rel="nofollow noopener">{label}</a></li>')
     return "<ul>" + "".join(items) + "</ul>"
+
+
+def clean_net_worth(raw):
+    """
+    Paliekame $XM arba $XB formata.
+    Pvz: "$1.2M" -> "$1.2M", "$1,200,000" -> "$1.2M"
+    """
+    raw = str(raw).strip()
+    # Jei jau tvarkingas formatas
+    if re.match(r"^\$[\d,\.]+[MBK]?$", raw):
+        return raw
+    # Bandome isskirti skaiciu
+    nums = re.findall(r"[\d,\.]+", raw)
+    if nums:
+        num = float(nums[0].replace(",", ""))
+        if num >= 1_000_000_000:
+            return f"${num/1_000_000_000:.1f}B"
+        elif num >= 1_000_000:
+            return f"${num/1_000_000:.1f}M"
+        elif num >= 1_000:
+            return f"${num/1_000:.0f}K"
+        else:
+            return f"${num:.1f}M"
+    return raw
+
+
+def clean_history(raw):
+    """
+    Formatas turi buti: 2022:1200000,2023:1500000,2024:1800000,2025:2000000,2026:2200000
+    Pilni skaiciai (ne 0.05M) - kad grafike teisingai atvaizduotu.
+    Konvertuojame jei gauta M/B formatu.
+    """
+    if not raw:
+        return ""
+    entries = []
+    for part in raw.split(","):
+        part = part.strip()
+        m = re.match(r"(\d{4}):(.+)", part)
+        if not m:
+            continue
+        year = m.group(1)
+        val_raw = m.group(2).strip()
+        # Konvertuojame i skaiciu
+        try:
+            if val_raw.endswith("B") or val_raw.endswith("b"):
+                num = float(val_raw[:-1]) * 1_000_000_000
+            elif val_raw.endswith("M") or val_raw.endswith("m"):
+                num = float(val_raw[:-1]) * 1_000_000
+            elif val_raw.endswith("K") or val_raw.endswith("k"):
+                num = float(val_raw[:-1]) * 1_000
+            else:
+                num = float(val_raw.replace(",", ""))
+            entries.append(f"{year}:{int(num)}")
+        except:
+            entries.append(part)
+    return ",".join(entries)
 
 
 def post_to_wp(name, data, img_id):
     print("    [4/4] Keliame i WordPress...")
 
-    # Kategorijos - imame iki 2
+    # Kategorijos - visada 2
     cats = [CAT_MAP[c] for c in data.get("cats", []) if c in CAT_MAP][:2]
-    # Jei tik 1 kategorija rasta - pridedame "United States (USA)" kaip antra
-    if len(cats) == 1:
-        if 19 not in cats:
-            cats.append(19)
+    if len(cats) < 2 and 19 not in cats:
+        cats.append(19)  # pridedame "United States (USA)"
 
-    # Source of wealth - tiksliai is WEALTH_OPTIONS saraso
-    raw_sources = data.get("wealth_sources", [])
-    matched_sources = [s for s in raw_sources if s in WEALTH_OPTIONS][:2]
-
-    # Net worth - isvalome, paliekame tik skaiciaus formata
-    net_worth = data.get("net_worth", "")
-
-    # History - tikslus formatas: "2022:2M,2023:2.5M,2024:3M,2025:3.5M,2026:4M"
-    history = data.get("history", "")
-
-    # Assets - trumpas tekstas, tik pagrindiniai 1-2 saltiniai
-    assets = data.get("assets", "")
-
-    # SEO laukeliai
-    seo_title = data.get("seo_title", f"{name} Net Worth 2026")
-    seo_desc  = data.get("seo_desc", f"Learn about {name}'s net worth, assets, and financial portfolio in 2026.")
-
+    # Saltiniai - grazus HTML
     sources_html = format_sources_html(data.get("urls", []))
 
+    # Net worth - tvarkingas formatas
+    net_worth = clean_net_worth(data.get("net_worth", ""))
+
+    # History - pilni skaiciai
+    history = clean_history(data.get("history", ""))
+
+    # Source of wealth - tik is leidžiamo saraso
+    matched_sources = [s for s in data.get("wealth_sources", []) if s in WEALTH_OPTIONS][:2]
+
+    # Assets - trumpas tekstas
+    assets = data.get("assets", "")
+
+    # SEO
+    seo_title = data.get("seo_title", f"{name} Net Worth 2026")[:60]
+
+    # Description - BEZ net worth sumos (kad zmogus eitu i svetaine)
+    seo_desc = f"Explore {name}'s financial background, career earnings, and key assets in 2026. Full breakdown inside."
+    if len(seo_desc) > 155:
+        seo_desc = seo_desc[:152] + "..."
+
+    # Focus keyword
+    focus_keyword = f"{name} Net Worth 2026"
+
+    # Slug - tvarkingas
+    slug = make_slug(name)
+
+    # Straipsnio pavadinimas - be metaduomenu, tik vardas
+    title = f"{name} Net Worth 2026"
+
     payload = {
-        "title":          f"{name} Net Worth 2026: Financial Portfolio & Assets",
+        "title":          title,
+        "slug":           slug,
         "content":        data["article"],
         "status":         "publish",
         "featured_media": img_id,
@@ -260,8 +323,9 @@ def post_to_wp(name, data, img_id):
             "sources":           sources_html
         },
         "meta": {
-            "rank_math_title":       seo_title,
-            "rank_math_description": seo_desc,
+            "rank_math_title":          seo_title,
+            "rank_math_description":    seo_desc,
+            "rank_math_focus_keyword":  focus_keyword,
         }
     }
 
@@ -274,8 +338,11 @@ def post_to_wp(name, data, img_id):
             )
             print(f"    [4/4] WP atsake: {wp_res.status_code}")
             if wp_res.status_code == 201:
-                link = wp_res.json().get("link", "")
+                resp_data = wp_res.json()
+                link = resp_data.get("link", "")
+                actual_slug = resp_data.get("slug", "")
                 print(f"    [4/4] Ikeltas! {link}")
+                print(f"    [4/4] Slug: {actual_slug}")
                 return True
             elif wp_res.status_code in (500, 502, 503, 504):
                 print(f"    [4/4] WP serverio klaida. Laukiam {10*(attempt+1)}s...")
@@ -294,24 +361,24 @@ def post_to_wp(name, data, img_id):
 
 
 def build_prompt(name):
-    return f"""You are writing a financial profile article for the website politiciannetworth.com.
+    return f"""You are writing a financial profile for politiciannetworth.com.
 
 Write a 700-900 word article about {name}'s net worth in 2026.
-- Use simple language that any reader can understand. Do NOT sound like AI.
-- Include 1-2 interesting personal facts or lesser-known details about their career or background.
-- Use <h2> and <h3> HTML tags for sections. Use <strong> for key numbers.
-- Base net worth estimates ONLY on verified public sources: OpenSecrets, Ballotpedia, financial disclosures, Forbes, or major news outlets.
-- For net_worth_history: find realistic yearly estimates for 2022, 2023, 2024, 2025, 2026 from public financial disclosures. Format: "2022:XM,2023:XM,2024:XM,2025:XM,2026:XM" where X is a number in millions (e.g. 2022:1.2M).
-- For wealth_sources: pick ONLY from this exact list (max 2): ["Stock Market Investments", "Real Estate Holdings", "Venture Capital", "Professional Law Practice", "Family Inheritance"]
-- For assets: write 1 sentence naming the 1-2 main asset types only (e.g. "Investment portfolio and primary residence in Wisconsin.")
-- For cats: pick up to 2 from: ["US Senate", "US House of Representatives", "Executive Branch", "State Governors", "United States (USA)"]
-- seo_title must be under 60 characters.
-- seo_desc must be under 155 characters and include the politician's name and net worth year.
-- urls: include 2-3 real, working URLs from opensecrets.org, ballotpedia.org, or senate.gov/house.gov only.
+Rules:
+- Simple, human language. Do NOT sound like AI. Add 1-2 interesting lesser-known facts.
+- Use <h2> and <h3> HTML tags. Use <strong> for key numbers.
+- Base ALL estimates ONLY on real public sources: OpenSecrets, Ballotpedia, official financial disclosures, Forbes, Reuters, AP.
+- net_worth: the most accurate estimate you can find, in format "$XM" or "$XB". If under $1M use "$X00K".
+- history: realistic yearly net worth for 2022,2023,2024,2025,2026 in FULL NUMBERS (not 0.05M - write the actual dollar amount like 1200000). Format: "2022:1200000,2023:1500000,2024:1800000,2025:2000000,2026:2200000"
+- wealth_sources: pick MAX 2 from EXACTLY this list: ["Stock Market Investments", "Real Estate Holdings", "Venture Capital", "Professional Law Practice", "Family Inheritance"]
+- assets: ONE sentence naming only the 1-2 main asset types. Example: "Investment portfolio and primary residence in Wisconsin."
+- cats: pick 1-2 from: ["US Senate", "US House of Representatives", "Executive Branch", "State Governors", "United States (USA)"]
+- seo_title: under 60 chars, example: "{name} Net Worth 2026"
+- urls: 2-3 real working URLs from opensecrets.org, ballotpedia.org, senate.gov, or house.gov only.
 
-Respond ONLY with valid JSON. No markdown. No extra text. No trailing commas.
+Return ONLY valid JSON. No markdown. No extra text. No trailing commas.
 
-{{"article":"<h2>...</h2><p>...</p>","net_worth":"$XM","job_title":"U.S. Senator","history":"2022:XM,2023:XM,2024:XM,2025:XM,2026:XM","urls":["https://ballotpedia.org/...","https://opensecrets.org/..."],"wealth_sources":["Real Estate Holdings","Stock Market Investments"],"assets":"One sentence about main assets only.","seo_title":"{name} Net Worth 2026","seo_desc":"{name} net worth in 2026 estimated at $XM. Learn about their financial portfolio and assets.","cats":["US Senate","United States (USA)"]}}"""
+{{"article":"<h2>...</h2><p>...</p>","net_worth":"$XM","job_title":"U.S. Senator","history":"2022:1200000,2023:1500000,2024:1800000,2025:2000000,2026:2200000","urls":["https://ballotpedia.org/...","https://opensecrets.org/..."],"wealth_sources":["Real Estate Holdings","Stock Market Investments"],"assets":"One sentence about main assets.","seo_title":"{name} Net Worth 2026","cats":["US Senate","United States (USA)"]}}"""
 
 
 def run_wealth_bot(politician_name, gemini_url):
@@ -325,9 +392,7 @@ def run_wealth_bot(politician_name, gemini_url):
     if wiki_img:
         img_id = upload_image_to_wp(politician_name, wiki_img)
 
-    prompt = build_prompt(politician_name)
-
-    res = call_gemini(prompt, gemini_url)
+    res = call_gemini(build_prompt(politician_name), gemini_url)
     if not res or "candidates" not in res:
         print(f"  PRALEISTA: {politician_name}")
         stats["skip"] += 1
@@ -371,7 +436,6 @@ if __name__ == "__main__":
 
     for i, name in enumerate(names):
         run_wealth_bot(name, gemini_url)
-
         if i < len(names) - 1:
             pause = 20 if (i + 1) % 10 == 0 else 8
             print(f"\nPauze {pause}s... (ok={stats['ok']} fail={stats['fail']} skip={stats['skip']})")
