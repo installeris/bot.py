@@ -7,18 +7,17 @@ import sys
 
 sys.stdout.reconfigure(line_buffering=True)
 
-print("--- 💎 PROFESIONALUS FINANSŲ ANALITIKAS V5 (RankMath & Accuracy Fix) ---")
+print("--- 💎 PROFESIONALUS ANALITIKAS (No-Block Version) ---")
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 WP_USER = os.getenv("WP_USERNAME")
 WP_PASS = os.getenv("WP_APP_PASS")
 WP_BASE_URL = "https://politiciannetworth.com/wp-json"
 
-# Nustatymai
 WEALTH_OPTIONS = ["Stock Market Investments", "Real Estate Holdings", "Venture Capital", "Professional Law Practice", "Family Inheritance"]
-CAT_MAP = {"US Senate": 1, "US House of Representatives": 2, "Executive Branch": 3, "State Governors": 4, "United Kingdom (UK)": 20, "United States (USA)": 19}
+CAT_MAP = {"US Senate": 1, "US House of Representatives": 2, "Executive Branch": 3, "State Governors": 4, "United States (USA)": 19}
 
-# Modelis (Tier 1 stabilumas)
+# Naudojame v1beta, nes ji geriausiai priima saugumo nustatymus
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
 
 def get_wiki_image(name):
@@ -42,30 +41,40 @@ def run_wealth_bot(politician_name):
             img_id = res.json()["id"]
         except: pass
 
-    # GRIEŽTAS ANALITIKO PROMPTAS
     prompt = (
-        f"Act as a professional financial investigator for 'Politician Net Worth'. \n"
-        f"TOPIC: {politician_name} Net Worth 2026. \n\n"
-        f"STRICT REQUIREMENTS: \n"
-        f"1. RESEARCH: Look for data from OpenSecrets and official disclosures. Provide a realistic net worth based on their salary ($174k/year) and assets. \n"
-        f"2. HISTORY: Provide 4-5 data points for the chart (e.g., '2018:Value, 2020:Value, 2022:Value, 2024:Value, 2026:Value'). Use real progression. \n"
-        f"3. STYLE: Write 800 words. Be conversational but expert. Use 'Did you know?' facts. Avoid AI clichés. Use H2/H3 and **bold numbers**. \n"
-        f"4. CATEGORIES: Choose EXACTLY 2 from {list(CAT_MAP.keys())}. \n"
-        f"5. WEALTH: Choose EXACTLY 2 from {WEALTH_OPTIONS}. \n"
-        f"6. ASSETS: Provide a short comma-separated list of 3 specific assets. \n"
-        f"7. SEO: Create a click-worthy Rank Math Title and Description. \n\n"
-        f"RETURN ONLY JSON: {{\"article\": \"HTML\", \"net_worth\": \"$X.M\", \"job_title\": \"Official Title\", \"history\": \"2018:X,2026:Y\", \"sources_urls\": [\"URL1\", \"URL2\"], \"wealth_sources\": [], \"assets\": \"Asset1, Asset2\", \"seo_title\": \"RankMathTitle\", \"seo_desc\": \"RankMathDesc\", \"cats\": []}}"
+        f"Write a professional 900-word financial biography for {politician_name} in 2026. \n"
+        f"FACTS: Use data from OpenSecrets/Ballotpedia. Show net worth growth from 2018 to 2026. \n"
+        f"STYLE: Conversational, expert, informative. Use H2/H3 and **bold numbers**. \n"
+        f"JSON: {{ \"article\": \"HTML\", \"net_worth\": \"$M\", \"job_title\": \"Title\", \"history\": \"2018:X,2021:Y,2026:Z\", \"urls\": [\"URL1\", \"URL2\"], \"wealth_sources\": [], \"assets\": \"Asset1, Asset2\", \"seo_title\": \"SEO Title\", \"seo_desc\": \"SEO Desc\", \"cats\": [] }}"
     )
 
+    # SVARBU: Išjungiami filtrai, kad nebūtų 'candidates' klaidos
+    safety_settings = [
+        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+    ]
+
     try:
-        response = requests.post(GEMINI_URL, json={"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"response_mime_type": "application/json"}})
-        data = json.loads(response.json()['candidates'][0]['content']['parts'][0]['text'])
+        response = requests.post(GEMINI_URL, json={
+            "contents": [{"parts": [{"text": prompt}]}],
+            "safetySettings": safety_settings,
+            "generationConfig": {"temperature": 0.7}
+        })
+        
+        res_json = response.json()
+        if 'candidates' not in res_json:
+            print(f"  ❌ Google blokas: {res_json.get('promptFeedback', 'Saugumo filtrai')}")
+            return
 
-        # Šaltinių atvaizdavimas (Gražus sąrašas)
-        sources_list = "".join([f'<li><a href="{u}" target="_blank" rel="nofollow noopener">{u}</a></li>' for u in data.get("sources_urls", [])])
-        sources_html = f"<strong>Financial Data Sources:</strong><ul>{sources_list}</ul>"
+        ai_text = res_json['candidates'][0]['content']['parts'][0]['text']
+        data = json.loads(re.search(r'\{.*\}', ai_text, re.DOTALL).group())
 
-        # WordPress Payload su Rank Math laukais
+        # Šaltinių dizainas
+        sources_list = "".join([f'<li><a href="{u}" target="_blank" rel="nofollow noopener">{u}</a></li>' for u in data.get("urls", [])])
+        sources_html = f"<p><strong>Financial Data Sources:</strong></p><ul>{sources_list}</ul>"
+
         payload = {
             "title": f"{politician_name} Net Worth 2026",
             "content": data["article"],
@@ -80,7 +89,7 @@ def run_wealth_bot(politician_name):
                 "main_assets": data.get("assets", ""),
                 "sources": sources_html
             },
-            # Rank Math integracija per API
+            # Rank Math laukai
             "rank_math_title": data.get("seo_title", ""),
             "rank_math_description": data.get("seo_desc", ""),
             "rank_math_focus_keyword": f"{politician_name} net worth"
@@ -97,4 +106,4 @@ if __name__ == "__main__":
         with open("names.txt", "r") as f:
             for name in [n.strip() for n in f if n.strip()]:
                 run_wealth_bot(name)
-                time.sleep(15) # Saugus tarpas Tier 1
+                time.sleep(10)
