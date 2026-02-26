@@ -148,7 +148,7 @@ def call_gemini(prompt, gemini_url, retries=4):
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
             "temperature": 0.7,
-            "maxOutputTokens": 2048
+            "maxOutputTokens": 8192
         },
         "safetySettings": [
             {"category": c, "threshold": "BLOCK_NONE"}
@@ -190,13 +190,47 @@ def call_gemini(prompt, gemini_url, retries=4):
 
 
 def parse_json(text):
+    # 1. Bandome tiesiogiai
+    try:
+        return json.loads(text)
+    except:
+        pass
+
+    # 2. ```json ... ``` blokas
     md = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
     if md:
-        return json.loads(md.group(1))
-    brace = re.search(r"\{.*\}", text, re.DOTALL)
-    if brace:
-        return json.loads(brace.group())
-    return json.loads(text)
+        try:
+            return json.loads(md.group(1))
+        except:
+            pass
+
+    # 3. Randame { ir paskutinį } - imame viską tarp jų
+    start = text.find('{')
+    end = text.rfind('}')
+    if start != -1 and end != -1:
+        candidate = text[start:end+1]
+        try:
+            return json.loads(candidate)
+        except:
+            pass
+
+    # 4. Jei HTML article lauke yra neescaped kabutelės - bandome jas pataisyti
+    # Randame "article": "..." ir escapiname vidų
+    def fix_json_string(raw):
+        # Pakeičiame kontrolinius simbolius
+        raw = raw.replace("\r\n", "\\n").replace("\n", "\\n").replace("\t", "\\t")
+        return raw
+
+    start = text.find('{')
+    end = text.rfind('}')
+    if start != -1 and end != -1:
+        candidate = fix_json_string(text[start:end+1])
+        try:
+            return json.loads(candidate)
+        except:
+            pass
+
+    raise ValueError(f"Nepavyko parsinuoti JSON. Tekstas prasideda: {text[:200]}")
 
 
 def post_to_wp(name, data, img_id):
