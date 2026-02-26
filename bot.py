@@ -22,15 +22,60 @@ WEALTH_OPTIONS = [
     "Stock Market Investments", "Real Estate Holdings", "Venture Capital",
     "Professional Law Practice", "Family Inheritance"
 ]
+
+# ── Tikri kategorijų ID iš WP ─────────────────────────────────────────────────
 CAT_MAP = {
-    "US Senate": 1, "US House of Representatives": 2,
-    "Executive Branch": 3, "State Governors": 4, "United States (USA)": 19
+    # USA
+    "US Senate":                   1,
+    "US House of Representatives": 2,
+    "Executive Branch":            3,
+    "State Governors":             4,
+    "State Senators":              5,
+    "United States (USA)":         19,
+    # UK
+    "House of Commons":            6,
+    "House of Lords":              7,
+    "United Kingdom (UK)":         20,
+    # European Parliament
+    "Germany":                     8,
+    "France":                      9,
+    "Italy":                       10,
+    "Spain":                       11,
+    "Poland":                      12,
+    "Romania":                     13,
+    "Netherlands":                 14,
+    "Belgium":                     15,
+    "Greece":                      16,
+    "Sweden":                      17,
+    "European Parliament":         18,
+    # Global
+    "Global":                      23,
+}
+
+# Pagrindinė kategorija pagal subkategoriją
+PARENT_CAT = {
+    1:  19,   # US Senate -> United States (USA)
+    2:  19,   # US House -> United States (USA)
+    3:  19,   # Executive Branch -> United States (USA)
+    4:  19,   # State Governors -> United States (USA)
+    5:  19,   # State Senators -> United States (USA)
+    6:  20,   # House of Commons -> United Kingdom (UK)
+    7:  20,   # House of Lords -> United Kingdom (UK)
+    8:  18,   # Germany -> European Parliament
+    9:  18,   # France -> European Parliament
+    10: 18,   # Italy -> European Parliament
+    11: 18,   # Spain -> European Parliament
+    12: 18,   # Poland -> European Parliament
+    13: 18,   # Romania -> European Parliament
+    14: 18,   # Netherlands -> European Parliament
+    15: 18,   # Belgium -> European Parliament
+    16: 18,   # Greece -> European Parliament
+    17: 18,   # Sweden -> European Parliament
 }
 
 stats = {"ok": 0, "fail": 0, "skip": 0}
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 def find_gemini_url():
     preferred = [
         "gemini-2.0-flash-001", "gemini-2.0-flash-lite-001",
@@ -84,7 +129,6 @@ def find_gemini_url():
     sys.exit(1)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 def get_wiki_image(name):
     print("    [1/4] Wikipedia nuotrauka...")
     try:
@@ -128,7 +172,6 @@ def upload_image_to_wp(name, img_url):
     return None
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 def call_gemini(prompt, gemini_url, retries=4):
     delay = 15
     payload = {
@@ -167,7 +210,6 @@ def call_gemini(prompt, gemini_url, retries=4):
     return None
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 def parse_json(text):
     for t in [text, text.strip()]:
         try:
@@ -189,7 +231,6 @@ def parse_json(text):
     raise ValueError(f"Nepavyko parsinuoti JSON. Pradzia: {text[:300]}")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 def make_slug(name):
     slug = name.lower().strip()
     slug = re.sub(r"[^a-z0-9\s-]", "", slug)
@@ -197,14 +238,8 @@ def make_slug(name):
     return f"{slug}-net-worth"
 
 
-def parse_dollar_to_int(val_str):
-    """
-    Konvertuoja bet koki net worth stringa i integer (pilnas skaicius).
-    "$1.2M" -> 1200000
-    "$410K" -> 410000
-    "$1.5B" -> 1500000000
-    "1200000" -> 1200000
-    """
+def parse_to_int(val_str):
+    """Konvertuoja bet kokį formatą į integer. $2.3M -> 2300000, $410K -> 410000"""
     val_str = str(val_str).strip().replace(",", "").replace("$", "")
     try:
         if val_str.upper().endswith("B"):
@@ -219,41 +254,21 @@ def parse_dollar_to_int(val_str):
         return 0
 
 
-def int_to_display(num):
-    """
-    Konvertuoja integer i graziai atrodanti displeja.
-    1200000   -> "$1.2M"
-    410000    -> "$410K"
-    1500000000 -> "$1.5B"
-    """
-    if num >= 1_000_000_000:
-        return f"${num/1_000_000_000:.1f}B"
-    elif num >= 1_000_000:
-        val = num / 1_000_000
-        return f"${val:.1f}M" if val != int(val) else f"${int(val)}M"
-    elif num >= 1_000:
-        val = num / 1_000
-        return f"${val:.0f}K"
-    else:
-        return f"${num}"
-
-
 def clean_net_worth(raw):
     """
-    Grazina display formata: "$1.2M", "$410K", "$1.5B"
-    Niekada nerodo tik skaiciaus be vieneto.
+    Net worth -> plain integer string be simbolių.
+    WP custom field tikisi: "2300000" (ne "$2.3M")
     """
-    num = parse_dollar_to_int(raw)
+    num = parse_to_int(raw)
     if num == 0:
-        return raw  # paliekame original jei neparsino
-    return int_to_display(num)
+        return "0"
+    return str(num)
 
 
 def clean_history(raw):
     """
-    Konvertuoja i formata su PILNAIS SKAICIAIS:
+    History -> pilni integer skaičiai.
     "2022:1.2M,2023:1.5M" -> "2022:1200000,2023:1500000"
-    Grafiko komponentas tikisi integer reiksmes.
     """
     if not raw:
         return ""
@@ -264,69 +279,90 @@ def clean_history(raw):
         if not m:
             continue
         year = m.group(1)
-        num = parse_dollar_to_int(m.group(2))
+        num = parse_to_int(m.group(2))
         if num > 0:
             entries.append(f"{year}:{num}")
     return ",".join(entries)
 
 
-def format_sources_html(urls):
+def format_sources(urls):
     """
-    Grazus saltiniai - tik veikianti nuoroda su etikete.
-    SVARBU: plain HTML be extra kodo, nes WP custom field rodo ji kaip HTML.
+    Gražūs sources - tik pavadinimas su nuoroda, be HTML šiukšlių.
+    Grąžina paprastą tekstą su nuorodomis, kurį WP rodo teisingai.
     """
     label_map = {
         "opensecrets.org":  "OpenSecrets",
         "ballotpedia.org":  "Ballotpedia",
         "senate.gov":       "U.S. Senate",
-        "house.gov":        "U.S. House of Representatives",
+        "house.gov":        "U.S. House",
         "forbes.com":       "Forbes",
         "reuters.com":      "Reuters",
-        "ap.org":           "Associated Press",
         "apnews.com":       "AP News",
+        "theyworkforyou.com": "They Work For You",
+        "parliament.uk":    "UK Parliament",
+        "europarl.europa.eu": "European Parliament",
     }
-    items = []
+    lines = []
     for url in urls:
         domain = re.sub(r"https?://(www\.)?", "", url).split("/")[0]
-        label = label_map.get(domain, domain)
-        items.append(f'<li><a href="{url}" target="_blank" rel="nofollow noopener">{label}</a></li>')
-    return "<ul>" + "".join(items) + "</ul>"
+        # Tikriname ar domain sutampa su kokiu nors label_map raktu
+        label = domain  # default
+        for key, val in label_map.items():
+            if key in domain:
+                label = val
+                break
+        lines.append(f'<a href="{url}" target="_blank" rel="nofollow noopener">{label}</a>')
+    # Grąžiname kaip paprastą sąrašą su | separatoriumi - atrodys gražiai
+    return " | ".join(lines)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+def resolve_categories(cat_names):
+    """
+    Iš kategorijų pavadinimų sukuria ID sąrašą su tėvinėmis kategorijomis.
+    Pvz: ["US Senate"] -> [1, 19] (US Senate + United States (USA))
+    """
+    cat_ids = set()
+    for name in cat_names:
+        if name in CAT_MAP:
+            cat_id = CAT_MAP[name]
+            cat_ids.add(cat_id)
+            # Automatiškai pridedame tėvinę kategoriją
+            if cat_id in PARENT_CAT:
+                cat_ids.add(PARENT_CAT[cat_id])
+    # Jei nieko nerasta - Global
+    if not cat_ids:
+        cat_ids.add(23)
+    return list(cat_ids)
+
+
 def post_to_wp(name, data, img_id):
     print("    [4/4] Keliame i WordPress...")
 
-    # Kategorijos - visada 2
-    cats = [CAT_MAP[c] for c in data.get("cats", []) if c in CAT_MAP][:2]
-    if len(cats) < 2 and 19 not in cats:
-        cats.append(19)
+    # Kategorijos su tėvinėmis
+    cats = resolve_categories(data.get("cats", []))
+    print(f"    Kategorijos: {cats}")
 
-    # Net worth - tvarkingas display formatas
-    net_worth_raw = data.get("net_worth", "")
-    net_worth_display = clean_net_worth(net_worth_raw)
-    print(f"    Net worth: {net_worth_raw} -> {net_worth_display}")
+    # Net worth - plain integer
+    net_worth = clean_net_worth(data.get("net_worth", "0"))
+    print(f"    Net worth: {data.get('net_worth','')} -> {net_worth}")
 
-    # History - pilni skaiciai
-    history_raw = data.get("history", "")
-    history_clean = clean_history(history_raw)
-    print(f"    History: {history_clean[:80]}...")
+    # History - pilni skaičiai
+    history = clean_history(data.get("history", ""))
+    print(f"    History: {history[:60]}...")
 
-    # Source of wealth - tik is leidžiamo saraso, max 2
+    # Sources - gražus tekstas su nuorodomis
+    sources = format_sources(data.get("urls", []))
+
+    # Source of wealth
     matched_sources = [s for s in data.get("wealth_sources", []) if s in WEALTH_OPTIONS][:2]
-    print(f"    Sources: {matched_sources}")
+    print(f"    Wealth sources: {matched_sources}")
 
-    # Assets - trumpas tekstas
+    # Assets
     assets = data.get("assets", "")
-
-    # Saltiniai - grazus HTML
-    sources_html = format_sources_html(data.get("urls", []))
 
     # SEO
     seo_title = data.get("seo_title", f"{name} Net Worth 2026")[:60]
-    seo_desc  = f"Discover {name}'s financial profile, career earnings, and wealth breakdown for 2026. Full analysis inside."
-    if len(seo_desc) > 155:
-        seo_desc = seo_desc[:152] + "..."
+    seo_desc  = f"Discover {name}'s financial profile, career earnings, and wealth breakdown for 2026. Full analysis inside."[:155]
     focus_kw  = f"{name} Net Worth 2026"
 
     payload = {
@@ -338,11 +374,11 @@ def post_to_wp(name, data, img_id):
         "categories":     cats,
         "acf": {
             "job_title":         data.get("job_title", ""),
-            "net_worth":         net_worth_display,
-            "net_worth_history": history_clean,
+            "net_worth":         net_worth,
+            "net_worth_history": history,
             "source_of_wealth":  matched_sources,
             "main_assets":       assets,
-            "sources":           sources_html,
+            "sources":           sources,
         },
         "meta": {
             "rank_math_title":         seo_title,
@@ -379,41 +415,34 @@ def post_to_wp(name, data, img_id):
     return False
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 def build_prompt(name):
+    cats_list = ", ".join(CAT_MAP.keys())
     return f"""You are a financial researcher writing for politiciannetworth.com.
 
-Your task: write a 700-900 word article about {name}'s estimated net worth in 2026.
+Write a 700-900 word article about {name}'s estimated net worth in 2026.
 
 RESEARCH INSTRUCTIONS:
-- Cross-reference at least 3 sources: OpenSecrets financial disclosures, Ballotpedia, and news sources (Forbes, Reuters, AP, Roll Call).
-- OpenSecrets URL format: https://www.opensecrets.org/personal-finances/[name]/net-worth
-- net_worth: give the BEST estimate in dollars. Format rules:
-  * If under $1,000,000: use format like "$750K" or "$410K"  
-  * If $1,000,000 to $999,999,999: use format like "$2.3M" or "$15M"
-  * If over $1,000,000,000: use format like "$1.2B"
-  * NEVER write just "$410" - always include K, M, or B suffix
-- history: net worth estimates for years 2022-2026 as FULL INTEGER DOLLAR AMOUNTS (no M/K/B suffix here).
-  Format EXACTLY like this: "2022:1200000,2023:1500000,2024:1800000,2025:2000000,2026:2200000"
-  If under $1M example: "2022:350000,2023:370000,2024:390000,2025:400000,2026:410000"
-- wealth_sources: analyze their background and pick MAX 2 from EXACTLY this list:
+- Cross-reference multiple sources: OpenSecrets financial disclosures, Ballotpedia, Forbes, Reuters, AP News, official government bios.
+- net_worth: best estimate as plain integer in dollars. Examples: 2300000 for $2.3M, 410000 for $410K, 1500000000 for $1.5B. NO $ sign, NO M/K/B suffix - just the raw number.
+- history: net worth for 2022-2026 as plain integers. Format EXACTLY: "2022:1200000,2023:1500000,2024:1800000,2025:2000000,2026:2300000". NO $ signs, NO M/K/B - raw numbers only.
+- wealth_sources: analyze their background carefully, pick MAX 2 from EXACTLY this list:
   ["Stock Market Investments", "Real Estate Holdings", "Venture Capital", "Professional Law Practice", "Family Inheritance"]
-- assets: ONE short sentence. Name only the 1-2 main asset types. Example: "Primary residence and diversified investment portfolio."
-- cats: pick 1-2 from: ["US Senate", "US House of Representatives", "Executive Branch", "State Governors", "United States (USA)"]
-- urls: exactly 2-3 real URLs from opensecrets.org, ballotpedia.org, senate.gov, or house.gov
+- assets: ONE sentence, 1-2 main asset types only. Example: "Primary residence and diversified investment portfolio."
+- cats: pick 1-2 most relevant from this list: [{cats_list}]
+- urls: 2-3 real working URLs from opensecrets.org, ballotpedia.org, senate.gov, house.gov, parliament.uk, or europarl.europa.eu
+- seo_title: under 60 chars. Example: "{name} Net Worth 2026"
 
 ARTICLE STYLE:
-- Simple language for general readers. Do NOT sound like AI.
+- Simple language, readable for anyone. Do NOT sound like AI.
 - Add 1-2 interesting lesser-known personal facts.
 - Use <h2> and <h3> HTML tags. Bold key numbers with <strong>.
-- 700-900 words total.
+- 700-900 words.
 
-Return ONLY valid JSON. No markdown fences. No extra text. No trailing commas.
+Return ONLY valid JSON. No markdown. No extra text. No trailing commas.
 
-{{"article":"<h2>...</h2><p>...</p>","net_worth":"$2.3M","job_title":"U.S. Senator","history":"2022:1800000,2023:2000000,2024:2100000,2025:2200000,2026:2300000","urls":["https://www.opensecrets.org/personal-finances/{name.replace(' ','_')}/net-worth","https://ballotpedia.org/{name.replace(' ','_')}"],"wealth_sources":["Real Estate Holdings","Stock Market Investments"],"assets":"Primary residence and investment portfolio.","seo_title":"{name} Net Worth 2026","cats":["US Senate","United States (USA)"]}}"""
+{{"article":"<h2>...</h2><p>...</p>","net_worth":"2300000","job_title":"U.S. Senator","history":"2022:1800000,2023:2000000,2024:2100000,2025:2200000,2026:2300000","urls":["https://www.opensecrets.org/personal-finances/...","https://ballotpedia.org/..."],"wealth_sources":["Real Estate Holdings","Stock Market Investments"],"assets":"Primary residence and investment portfolio.","seo_title":"{name} Net Worth 2026","cats":["US Senate"]}}"""
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 def run_wealth_bot(politician_name, gemini_url):
     num = stats['ok'] + stats['fail'] + stats['skip'] + 1
     print(f"\n{'='*55}")
@@ -453,7 +482,6 @@ def run_wealth_bot(politician_name, gemini_url):
         print(f"  NEPAVYKO: {politician_name}")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     if not os.path.exists("names.txt"):
         print("KLAIDA: names.txt nerastas!")
