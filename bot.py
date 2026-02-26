@@ -14,6 +14,8 @@ WP_USER     = os.getenv("WP_USERNAME")
 WP_PASS     = os.getenv("WP_APP_PASS")
 WP_BASE_URL = "https://politiciannetworth.com/wp-json"
 
+# Autorius "Financial Research Team" - rask WP Admin -> Users -> ID
+AUTHOR_ID      = 3   # <- pakeisk i tikra "Financial Research Team" vartotojo ID
 WP_TIMEOUT     = 30
 IMG_TIMEOUT    = 20
 GEMINI_TIMEOUT = 120
@@ -356,11 +358,20 @@ def post_to_wp(name, data, img_id):
 
     print(f"    SEO desc ({len(seo_desc)} chars): {seo_desc}")
 
+    # References sekcija straipsnio apačioje
+    refs_html = build_references_html(
+        data.get("urls", []),
+        job_title,
+        net_worth
+    )
+    full_article = data["article"] + refs_html
+
     payload = {
         "title":          f"{name} Net Worth 2026",
         "slug":           make_slug(name),
-        "content":        data["article"],
+        "content":        full_article,
         "status":         "publish",
+        "author":         AUTHOR_ID,
         "featured_media": img_id,
         "categories":     cats,
         "acf": {
@@ -407,6 +418,48 @@ def post_to_wp(name, data, img_id):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+def build_references_html(urls, job_title, net_worth_display):
+    """
+    Gražus References sekcija straipsnio apačioje su schema markup.
+    """
+    from datetime import datetime
+    month_year = datetime.now().strftime("%B %Y")
+
+    label_map = {
+        "opensecrets.org":        "OpenSecrets – Personal Finances",
+        "ballotpedia.org":        "Ballotpedia – Political Biography",
+        "disclosures-clerk.house.gov": "U.S. House Financial Disclosures",
+        "quiverquant.com":        "Quiver Quantitative – Congress Trading",
+        "senate.gov":             "U.S. Senate – Official Profile",
+        "house.gov":              "U.S. House – Official Profile",
+        "parliament.uk":          "UK Parliament – Member Profile",
+        "europarl.europa.eu":     "European Parliament – MEP Profile",
+        "forbes.com":             "Forbes – Wealth Estimate",
+        "reuters.com":            "Reuters",
+        "apnews.com":             "AP News",
+    }
+
+    items = []
+    for i, url in enumerate(urls, 1):
+        domain = re.sub(r"https?://(www\.)?", "", url).split("/")[0]
+        label = domain
+        for key, val in label_map.items():
+            if key in domain:
+                label = val
+                break
+        items.append(f'<li><a href="{url}" target="_blank" rel="nofollow noopener">{label}</a></li>')
+
+    refs_html = "".join(items)
+
+    return f"""
+<hr style="margin: 40px 0 20px;">
+<div class="references-section">
+  <h2>References &amp; Sources</h2>
+  <p><em>Last updated: {month_year}. Net worth estimates are based on public financial disclosures and independent research.</em></p>
+  <ul>{refs_html}</ul>
+</div>"""
+
+
 def build_prompt(name):
     cats_list = ", ".join(CAT_MAP.keys())
     wealth_list = ", ".join(WEALTH_OPTIONS)
@@ -435,7 +488,7 @@ history: their REAL estimated net worth for each year 2022-2026 as plain integer
   Example for someone worth $50M: "2022:35000000,2023:40000000,2024:44000000,2025:47000000,2026:50000000"
 
 wealth_sources: analyze HOW this specific person actually made their money.
-  Pick 1-4 that TRULY apply to THIS person from this list: [{wealth_list}]
+  Pick 1-2 that TRULY apply to THIS person from this list: [{wealth_list}]
   Think carefully - a lawyer turned senator picks "Professional Law Practice", a tech investor picks "Stock Market Investments", someone with inherited money picks "Family Inheritance".
 
 assets: ONE sentence describing THIS person's actual main assets. Be specific. Example: "Primary home in Wisconsin and a diversified mutual fund portfolio." NOT a generic description.
