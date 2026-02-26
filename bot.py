@@ -14,11 +14,6 @@ WP_USER     = os.getenv("WP_USERNAME")
 WP_PASS     = os.getenv("WP_APP_PASS")
 WP_BASE_URL = "https://politiciannetworth.com/wp-json"
 
-# Modelis bus nustatytas automatiškai per check_models.py
-# Jei nori fiksuoti – pakeisk čia:
-MODEL_ID    = "gemini-2.0-flash-lite"  # fallback, bus perrašytas jei rastas geresnis
-GEMINI_URL  = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_ID}:generateContent?key={GEMINI_KEY}"
-
 WP_TIMEOUT     = 30
 IMG_TIMEOUT    = 20
 GEMINI_TIMEOUT = 60
@@ -35,40 +30,77 @@ CAT_MAP = {
 stats = {"ok": 0, "fail": 0, "skip": 0}
 
 
-# ── Automatiškai randame geriausią modelį ─────────────────────────────────────
-def detect_best_model():
+def find_gemini_url():
     preferred = [
-        "gemini-2.0-flash",
+        "gemini-2.0-flash-001",
+        "gemini-2.0-flash-lite-001",
         "gemini-2.0-flash-lite",
+        "gemini-2.0-flash",
+        "gemini-flash-latest",
         "gemini-1.5-flash",
-        "gemini-1.5-flash-8b",
     ]
+    print("  Gauname modeliu sarasa...")
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_KEY}"
-        res = requests.get(url, timeout=15).json()
+        res = requests.get(
+            f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_KEY}",
+            timeout=15
+        ).json()
         available = [
             m["name"].replace("models/", "")
             for m in res.get("models", [])
             if "generateContent" in m.get("supportedGenerationMethods", [])
         ]
-        print(f"  📋 Rasti modeliai: {available}")
-        for model in preferred:
-            if model in available:
-                print(f"  ✅ Naudosime: {model}")
-                return model
-        # Jei nė vienas nerastas – imame pirmą flash
-        for m in available:
-            if "flash" in m:
-                print(f"  ✅ Naudosime (fallback): {m}")
-                return m
+        print(f"  Rasti modeliai: {available}")
     except Exception as e:
-        print(f"  ⚠️ Modelių tikrinimas nepavyko: {e}")
-    return MODEL_ID  # fallback
+        print(f"  Klaida gaunant sarasa: {e}")
+        available = []
+
+    chosen = None
+    for p in preferred:
+        if p in available:
+            chosen = p
+            break
+    if not chosen:
+        for m in available:
+            if "flash" in m.lower():
+                chosen = m
+                break
+    if not chosen:
+        chosen = "gemini-2.0-flash-001"
+
+    print(f"  Bandysime modeli: {chosen}")
+
+    test_payload = {"contents": [{"parts": [{"text": "Hi"}]}]}
+    for version in ["v1beta", "v1"]:
+        url = f"https://generativelanguage.googleapis.com/{version}/models/{chosen}:generateContent?key={GEMINI_KEY}"
+        try:
+            r = requests.post(url, json=test_payload, timeout=20)
+            print(f"  {version} -> {r.status_code}")
+            if r.status_code in (200, 400):
+                print(f"  Modelis veikia! Naudosime: {version}")
+                return url
+        except Exception as e:
+            print(f"  {version} klaida: {e}")
+
+    print("  Bandome visus galimus modelius...")
+    for model in available[:8]:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_KEY}"
+        try:
+            r = requests.post(url, json=test_payload, timeout=20)
+            print(f"  {model} -> {r.status_code}")
+            if r.status_code in (200, 400):
+                print(f"  Rastas veikiantis: {model}")
+                return url
+        except Exception as e:
+            print(f"  {model}: {e}")
+
+    print("KLAIDA: Nepavyko rasti veikiancio Gemini URL!")
+    print("Patikrink: 1) GEMINI_API_KEY secrets 2) Google AI Studio rakto galiojima")
+    sys.exit(1)
 
 
-# ── Wikipedia nuotrauka ────────────────────────────────────────────────────────
 def get_wiki_image(name):
-    print(f"    [1/4] 🌐 Wikipedia nuotrauka...")
+    print("    [1/4] Wikipedia nuotrauka...")
     try:
         url = (f"https://en.wikipedia.org/w/api.php?action=query&titles={name}"
                f"&prop=pageimages&format=json&pithumbsize=1200")
@@ -76,17 +108,16 @@ def get_wiki_image(name):
         pages = res.get("query", {}).get("pages", {})
         for pg in pages:
             if "thumbnail" in pages[pg]:
-                print(f"    [1/4] ✅ Rasta")
+                print("    [1/4] Rasta")
                 return pages[pg]["thumbnail"]["source"]
-        print(f"    [1/4] ⚠️ Nerasta")
+        print("    [1/4] Nerasta")
     except Exception as e:
-        print(f"    [1/4] ⚠️ Klaida: {e}")
+        print(f"    [1/4] Klaida: {e}")
     return None
 
 
-# ── Nuotraukos įkėlimas į WP ──────────────────────────────────────────────────
 def upload_image_to_wp(name, img_url):
-    print(f"    [2/4] 📤 Keliame nuotrauką į WP...")
+    print("    [2/4] Keliame nuotrauka i WP...")
     try:
         img_res = requests.get(img_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=IMG_TIMEOUT)
         img_res.raise_for_status()
@@ -101,24 +132,18 @@ def upload_image_to_wp(name, img_url):
         )
         if res.status_code == 201:
             media_id = res.json()["id"]
-            print(f"    [2/4] ✅ Įkelta (ID: {media_id})")
+            print(f"    [2/4] Ikelta (ID: {media_id})")
             return media_id
-        print(f"    [2/4] ❌ {res.status_code}: {res.text[:150]}")
+        print(f"    [2/4] Klaida {res.status_code}: {res.text[:150]}")
     except requests.exceptions.Timeout:
-        print(f"    [2/4] ⏱️ Timeout – tęsiame be nuotraukos")
+        print("    [2/4] Timeout - tesiame be nuotraukos")
     except Exception as e:
-        print(f"    [2/4] ⚠️ {e}")
+        print(f"    [2/4] {e}")
     return None
 
 
-# ── Gemini užklausa ───────────────────────────────────────────────────────────
-def call_gemini_with_retry(prompt, model_url, retries=4):
+def call_gemini(prompt, gemini_url, retries=4):
     delay = 15
-    # Bandome abu URL variantus: v1beta ir v1
-    urls_to_try = [
-        model_url,
-        model_url.replace("/v1beta/", "/v1/"),
-    ]
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
@@ -135,56 +160,47 @@ def call_gemini_with_retry(prompt, model_url, retries=4):
     }
     for i in range(retries):
         try:
-            print(f"    [3/4] ⏳ Gemini bandymas {i+1}/{retries}...")
+            print(f"    [3/4] Gemini bandymas {i+1}/{retries}...")
             t0 = time.time()
-            response = requests.post(model_url, json=payload, timeout=GEMINI_TIMEOUT)
+            response = requests.post(gemini_url, json=payload, timeout=GEMINI_TIMEOUT)
             elapsed = round(time.time() - t0, 1)
-            print(f"    [3/4] 📡 Atsakė per {elapsed}s – statusas: {response.status_code}")
+            print(f"    [3/4] Atsake per {elapsed}s - statusas: {response.status_code}")
 
             if response.status_code == 200:
-                print(f"    [3/4] ✅ Gemini OK")
+                print("    [3/4] Gemini OK")
                 return response.json()
             elif response.status_code in (429, 503):
-                print(f"    [3/4] ⚠️ Rate limit. Laukiam {delay}s...")
+                print(f"    [3/4] Rate limit. Laukiam {delay}s...")
                 time.sleep(delay)
                 delay = min(delay * 2, 120)
-            elif response.status_code == 404:
-                print(f"    [3/4] 🚨 Modelis nerastas (404)!")
-                break
             else:
-                print(f"    [3/4] ❌ Klaida {response.status_code}: {response.text[:200]}")
+                print(f"    [3/4] Klaida {response.status_code}: {response.text[:200]}")
                 break
 
         except requests.exceptions.Timeout:
-            elapsed = round(time.time() - t0, 1)
-            print(f"    [3/4] ⏱️ TIMEOUT po {elapsed}s! Laukiam {delay}s...")
+            print(f"    [3/4] TIMEOUT! Laukiam {delay}s...")
             time.sleep(delay)
             delay = min(delay * 2, 120)
         except Exception as e:
-            print(f"    [3/4] ❌ Išimtis: {e}")
+            print(f"    [3/4] Iskimtis: {e}")
             break
 
-    print(f"    [3/4] 🚨 Visi Gemini bandymai nepavyko")
+    print("    [3/4] Visi Gemini bandymai nepavyko")
     return None
 
 
-# ── JSON parsinavimas ─────────────────────────────────────────────────────────
-def parse_json_from_gemini(text):
-    # 1. ```json ... ``` blokas
+def parse_json(text):
     md = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
     if md:
         return json.loads(md.group(1))
-    # 2. { ... } blokas
     brace = re.search(r"\{.*\}", text, re.DOTALL)
     if brace:
         return json.loads(brace.group())
-    # 3. Tiesiogiai
     return json.loads(text)
 
 
-# ── Straipsnio įkėlimas į WP ──────────────────────────────────────────────────
 def post_to_wp(name, data, img_id):
-    print(f"    [4/4] 📝 Keliame į WordPress...")
+    print("    [4/4] Keliame i WordPress...")
     sources_html = "".join([
         f'<li><a href="{u}" target="_blank" rel="nofollow noopener">{u}</a></li>'
         for u in data.get("urls", [])
@@ -209,51 +225,48 @@ def post_to_wp(name, data, img_id):
 
     for attempt in range(3):
         try:
-            print(f"    [4/4] ⏳ WP POST bandymas {attempt+1}/3...")
+            print(f"    [4/4] WP POST bandymas {attempt+1}/3...")
             wp_res = requests.post(
                 f"{WP_BASE_URL}/wp/v2/posts",
                 json=payload, auth=(WP_USER, WP_PASS), timeout=WP_TIMEOUT
             )
-            print(f"    [4/4] 📡 WP atsakė: {wp_res.status_code}")
+            print(f"    [4/4] WP atsake: {wp_res.status_code}")
             if wp_res.status_code == 201:
-                url = wp_res.json().get("link", "")
-                print(f"    [4/4] ✅ Įkeltas! {url}")
+                link = wp_res.json().get("link", "")
+                print(f"    [4/4] Ikeltas! {link}")
                 return True
             elif wp_res.status_code in (500, 502, 503, 504):
-                print(f"    [4/4] ⚠️ WP serverio klaida. Laukiam {10*(attempt+1)}s...")
+                print(f"    [4/4] WP serverio klaida. Laukiam {10*(attempt+1)}s...")
                 time.sleep(10 * (attempt + 1))
             else:
-                print(f"    [4/4] ❌ WP klaida {wp_res.status_code}: {wp_res.text[:300]}")
+                print(f"    [4/4] WP klaida {wp_res.status_code}: {wp_res.text[:300]}")
                 return False
         except requests.exceptions.Timeout:
-            print(f"    [4/4] ⏱️ WP TIMEOUT! Bandymas {attempt+1}/3")
+            print(f"    [4/4] WP TIMEOUT! Bandymas {attempt+1}/3")
             time.sleep(15)
         except Exception as e:
-            print(f"    [4/4] ❌ Išimtis: {e}")
+            print(f"    [4/4] Iskimtis: {e}")
             return False
 
-    print(f"    [4/4] 🚨 Visi WP bandymai nepavyko")
+    print("    [4/4] Visi WP bandymai nepavyko")
     return False
 
 
-# ── Pagrindinis ciklas ────────────────────────────────────────────────────────
-def run_wealth_bot(politician_name, model_url):
+def run_wealth_bot(politician_name, gemini_url):
     num = stats['ok'] + stats['fail'] + stats['skip'] + 1
     print(f"\n{'='*55}")
-    print(f"💎 [{num}] {politician_name}")
+    print(f"[{num}] {politician_name}")
     print(f"{'='*55}")
 
-    # 1. Nuotrauka
     img_id = None
     wiki_img = get_wiki_image(politician_name)
     if wiki_img:
         img_id = upload_image_to_wp(politician_name, wiki_img)
 
-    # 2. Gemini
     prompt = (
         f"Write a 900-word financial article on {politician_name} net worth in 2026. "
         f"Use H2/H3 HTML tags. Bold key facts with <strong> tags.\n\n"
-        f"Respond ONLY with this JSON, no extra text, no markdown:\n"
+        f"Respond ONLY with valid JSON, no markdown, no extra text:\n"
         f'{{"article":"<h2>...</h2>...","net_worth":"$XM","job_title":"Title",'
         f'"history":"2020:XM,2026:XM","urls":["https://ballotpedia.org/..."],'
         f'"wealth_sources":["Real Estate"],"assets":"brief text",'
@@ -261,73 +274,56 @@ def run_wealth_bot(politician_name, model_url):
         f'"cats":["US Senate"]}}'
     )
 
-    res = call_gemini_with_retry(prompt, model_url)
+    res = call_gemini(prompt, gemini_url)
     if not res or "candidates" not in res:
-        print(f"  🚨 PRALEISTA: {politician_name}")
+        print(f"  PRALEISTA: {politician_name}")
         stats["skip"] += 1
         return
 
-    # 3. JSON
     try:
         full_text = res["candidates"][0]["content"]["parts"][0]["text"]
-        print(f"    [3/4] 🔍 Atsakymo ilgis: {len(full_text)} simbolių")
-        data = parse_json_from_gemini(full_text)
+        print(f"    [3/4] Atsakymo ilgis: {len(full_text)} simboliu")
+        data = parse_json(full_text)
     except Exception as e:
-        print(f"  🚨 JSON klaida: {e}")
-        print(f"  📄 Pradžia: {full_text[:400]}")
+        print(f"  JSON klaida: {e}")
+        try:
+            print(f"  Pradzia: {full_text[:400]}")
+        except:
+            pass
         stats["fail"] += 1
         return
 
-    # 4. WordPress
     ok = post_to_wp(politician_name, data, img_id)
     if ok:
         stats["ok"] += 1
-        print(f"  🎉 SĖKMĖ: {politician_name}")
+        print(f"  SEKME: {politician_name}")
     else:
         stats["fail"] += 1
-        print(f"  💀 NEPAVYKO: {politician_name}")
+        print(f"  NEPAVYKO: {politician_name}")
 
 
-# ── Startas ───────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     if not os.path.exists("names.txt"):
-        print("❌ names.txt nerastas!")
+        print("KLAIDA: names.txt nerastas!")
         sys.exit(1)
 
-    # Automatiškai randame veikiantį modelį
-    print("\n🔍 Ieškome geriausio Gemini modelio...")
-    best_model = detect_best_model()
-    gemini_url = None
-    for version in ["v1beta", "v1"]:
-        test_url = f"https://generativelanguage.googleapis.com/{version}/models/{best_model}:generateContent?key={GEMINI_KEY}"
-        try:
-            r = requests.post(test_url, json={"contents": [{"parts": [{"text": "Hi"}]}]}, timeout=15)
-            print(f"  URL test {version} -> {r.status_code}")
-            if r.status_code != 404:
-                gemini_url = test_url
-                print(f"  Naudosime versija: {version}")
-                break
-        except Exception as e:
-            print(f"  Klaida {version}: {e}")
-    if not gemini_url:
-        print("Nepavyko rasti veikiancio Gemini URL!")
-        sys.exit(1)
-    print(f"Modelis: {best_model}")
-    print()
+    print("\nIeskome veikiancio Gemini URL...")
+    gemini_url = find_gemini_url()
+    print(f"Gemini URL nustatytas.\n")
 
     with open("names.txt", "r") as f:
         names = [n.strip() for n in f if n.strip()]
 
-    print(f"📋 Vardų skaičius: {len(names)}")
+    print(f"Vardu skaicius: {len(names)}")
 
     for i, name in enumerate(names):
         run_wealth_bot(name, gemini_url)
 
         if i < len(names) - 1:
             pause = 20 if (i + 1) % 10 == 0 else 8
-            print(f"\n⏸️  Pauzė {pause}s... (✅{stats['ok']} ❌{stats['fail']} ⏭️{stats['skip']})")
+            print(f"\nPauze {pause}s... (ok={stats['ok']} fail={stats['fail']} skip={stats['skip']})")
             time.sleep(pause)
 
     print(f"\n{'='*55}")
-    print(f"📊 REZULTATAI: ✅ {stats['ok']} | ❌ {stats['fail']} | ⏭️ {stats['skip']}")
+    print(f"REZULTATAI: ok={stats['ok']} | fail={stats['fail']} | skip={stats['skip']}")
     print(f"{'='*55}")
