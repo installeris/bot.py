@@ -7,15 +7,15 @@ import sys
 
 sys.stdout.reconfigure(line_buffering=True)
 
-print("--- 🚀 BOTAS STARTUOJA (Vardų ir RankMath Fix) ---")
+print("--- 🛡️ BOTAS: PHOTO-ONLY MODE (2026 Fix) ---")
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 WP_USER = os.getenv("WP_USERNAME")
 WP_PASS = os.getenv("WP_APP_PASS")
 WP_BASE_URL = "https://politiciannetworth.com/wp-json"
 
-# Naudojame stabilų 2026 m. Tier 1 kelią
-MODEL_ID = "gemini-1.5-flash" # Arba gemini-2.5-flash, jei tavo regione jau aktyvus
+# Naudojame stabiliausią 2026 m. modelį
+MODEL_ID = "gemini-1.5-flash" 
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_ID}:generateContent?key={GEMINI_KEY}"
 
 WEALTH_OPTIONS = ["Stock Market Investments", "Real Estate Holdings", "Venture Capital", "Professional Law Practice", "Family Inheritance"]
@@ -24,85 +24,99 @@ CAT_MAP = {"US Senate": 1, "US House of Representatives": 2, "Executive Branch":
 def get_wiki_image(name):
     try:
         url = f"https://en.wikipedia.org/w/api.php?action=query&titles={name}&prop=pageimages&format=json&pithumbsize=1200"
-        res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).json()
+        res = requests.get(url, timeout=10).json()
         pages = res.get("query", {}).get("pages", {})
         for pg in pages:
             if "thumbnail" in pages[pg]: return pages[pg]["thumbnail"]["source"]
     except: return None
 
-def call_gemini_with_retry(prompt, retries=5):
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "safetySettings": [
-            {"category": c, "threshold": "BLOCK_NONE"} 
-            for c in ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]
-        ]
-    }
-    for i in range(retries):
-        response = requests.post(GEMINI_URL, json=payload)
-        if response.status_code == 200: return response.json()
-        time.sleep(10)
-    return None
-
 def run_wealth_bot(politician_name):
-    print(f"\n💎 Ruošiamas: {politician_name}")
-    img_id = None
+    print(f"\n🔍 Tikrinama: {politician_name}")
+    
+    # 1. ŽINGSNIS: Ieškome nuotraukos
     wiki_img = get_wiki_image(politician_name)
-    if wiki_img:
-        try:
-            img_res = requests.get(wiki_img, headers={'User-Agent': 'Mozilla/5.0'})
-            headers = {"Content-Disposition": f"attachment; filename=img.jpg", "Content-Type": "image/jpeg"}
-            res = requests.post(f"{WP_BASE_URL}/wp/v2/media", data=img_res.content, headers=headers, auth=(WP_USER, WP_PASS))
-            img_id = res.json()["id"] if res.status_code == 201 else None
-        except: pass
+    if not wiki_img:
+        print(f"  ⏭️ PRALEIDŽIAMA: Nuotrauka nerasta Wikipedia sistemoje.")
+        return
 
-    # Patobulintas tavo promptas (kad Rank Math nebūtų tuščias)
+    # 2. ŽINGSNIS: Bandome įkelti nuotrauką į WP
+    img_id = None
+    try:
+        img_res = requests.get(wiki_img, timeout=15)
+        if img_res.status_code == 200:
+            headers = {
+                "Content-Disposition": f"attachment; filename={politician_name.replace(' ', '_')}.jpg",
+                "Content-Type": "image/jpeg"
+            }
+            res = requests.post(f"{WP_BASE_URL}/wp/v2/media", data=img_res.content, headers=headers, auth=(WP_USER, WP_PASS), timeout=20)
+            if res.status_code == 201:
+                img_id = res.json()["id"]
+                print(f"  📸 Foto įkelta (ID: {img_id})")
+            else:
+                print(f"  ⏭️ PRALEIDŽIAMA: Nepavyko įkelti foto į WP (Status: {res.status_code})")
+                return
+        else:
+            print(f"  ⏭️ PRALEIDŽIAMA: Wikipedia nuotraukos URL nepasiekiamas.")
+            return
+    except Exception as e:
+        print(f"  ⏭️ PRALEIDŽIAMA: Klaida keliant foto ({e})")
+        return
+
+    # 3. ŽINGSNIS: Generuojame straipsnį tik jei turime img_id
     prompt = (
-        f"Write a professional 850-word financial article on {politician_name} net worth in 2026. \n"
-        f"FACTS: Use realistic net worth history (e.g. 2018: $1M, 2022: $1.1M, 2026: $1.2M). \n"
-        f"SOURCES: Provide 3 real URLs from OpenSecrets, Ballotpedia, or FEC. \n"
-        f"STYLE: Engaging, expert tone. Use H2/H3 and **bold numbers**. \n"
-        f"Return ONLY JSON: {{\"article\": \"HTML\", \"net_worth\": \"$1.2M\", \"job_title\": \"Senator\", "
-        f"\"history\": \"2018:1M,2022:1.1M,2026:1.2M\", \"urls\": [\"URL1\", \"URL2\"], "
-        f"\"wealth_sources\": [\"Stock Market Investments\"], \"assets\": \"Real estate, Mutual funds\", "
-        f"\"seo_title\": \"{politician_name} Net Worth 2026: Financial Portfolio\", "
-        f"\"seo_desc\": \"Explore the detailed financial portfolio and net worth growth of {politician_name} in 2026.\"}}"
+        f"Write an 850-word financial analysis for {politician_name} in 2026. \n"
+        f"Include net worth history (2018-2026), H2/H3 tags, and **bold figures**. \n"
+        f"SEO: Provide Rank Math Title and Description. \n"
+        f"Return ONLY JSON: {{\"article\": \"HTML\", \"net_worth\": \"$X.M\", \"job\": \"Role\", \"history\": \"2018:X,2022:Y,2026:Z\", \"urls\": [\"URL1\"], \"wealth\": [], \"assets\": \"Text\", \"seo_t\": \"Title\", \"seo_d\": \"Desc\"}}"
     )
 
-    res = call_gemini_with_retry(prompt)
-    if res and 'candidates' in res:
-        try:
-            full_text = res['candidates'][0]['content']['parts'][0]['text']
-            json_str = re.search(r'\{.*\}', full_text, re.DOTALL).group()
-            data = json.loads(json_str)
-            
-            # Tavo prašytas "GRIŽTAS" šaltinių atvaizdavimas
-            sources_html = "<strong>Financial Data Sources:</strong><ul>" + "".join([f'<li><a href="{u}" target="_blank" rel="nofollow noopener">{u}</a></li>' for u in data.get("urls", [])]) + "</ul>"
+    try:
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "safetySettings": [{"category": c, "threshold": "BLOCK_NONE"} for c in ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]],
+            "generationConfig": {"response_mime_type": "application/json"}
+        }
+        
+        response = requests.post(GEMINI_URL, json=payload, timeout=60)
+        if response.status_code != 200:
+            print(f"  ❌ API Klaida: {response.text}")
+            return
 
-            payload = {
-                "title": f"{politician_name} Net Worth 2026",
-                "content": data["article"],
-                "status": "publish",
-                "featured_media": img_id,
-                "categories": [19, 1], # United States + Senate (pavyzdys)
-                "acf": {
-                    "job_title": data.get("job_title", ""),
-                    "net_worth": data.get("net_worth", ""),
-                    "net_worth_history": data.get("history", ""),
-                    "source_of_wealth": data.get("wealth_sources", [])[:2],
-                    "main_assets": data.get("assets", ""),
-                    "sources": sources_html
-                },
-                "rank_math_title": data.get("seo_title", ""),
-                "rank_math_description": data.get("seo_desc", "")
-            }
-            requests.post(f"{WP_BASE_URL}/wp/v2/posts", json=payload, auth=(WP_USER, WP_PASS))
-            print(f"  ✅ SĖKMĖ: {politician_name}")
-        except Exception as e:
-            print(f"  🚨 Klaida: {e}")
+        data = json.loads(response.json()['candidates'][0]['content']['parts'][0]['text'])
+
+        # Šaltinių dizainas
+        sources_html = "<strong>Financial Data Sources:</strong><ul>" + "".join([f'<li><a href="{u}" target="_blank" rel="nofollow noopener">{u}</a></li>' for u in data.get("urls", [])]) + "</ul>"
+
+        wp_payload = {
+            "title": f"{politician_name} Net Worth 2026",
+            "content": data["article"],
+            "status": "publish",
+            "featured_media": img_id,
+            "categories": [19, 1],
+            "acf": {
+                "job_title": data.get("job", ""),
+                "net_worth": data.get("net_worth", ""),
+                "net_worth_history": data.get("history", ""),
+                "source_of_wealth": data.get("wealth", [])[:2],
+                "main_assets": data.get("assets", ""),
+                "sources": sources_html
+            },
+            "rank_math_title": data.get("seo_t", ""),
+            "rank_math_description": data.get("seo_d", "")
+        }
+
+        final_res = requests.post(f"{WP_BASE_URL}/wp/v2/posts", json=wp_payload, auth=(WP_USER, WP_PASS), timeout=30)
+        if final_res.status_code == 201:
+            print(f"  ✅ SĖKMĖ: {politician_name} paskelbtas!")
+        else:
+            print(f"  ❌ WP Klaida: {final_res.text}")
+
+    except Exception as e:
+        print(f"  🚨 Klaida apdorojant tekstą: {e}")
 
 if __name__ == "__main__":
-    with open("names.txt", "r") as f:
-        for name in [n.strip() for n in f if n.strip()]:
-            run_wealth_bot(name)
-            time.sleep(10)
+    if os.path.exists("names.txt"):
+        with open("names.txt", "r") as f:
+            for name in [n.strip() for n in f if n.strip()]:
+                run_wealth_bot(name)
+                time.sleep(15)
