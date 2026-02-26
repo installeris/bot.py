@@ -7,23 +7,26 @@ import sys
 
 sys.stdout.reconfigure(line_buffering=True)
 
-print("--- 🚀 BOTAS STARTUOJA (Gemini 2.0 Flash Fix) ---")
+print("--- 🚀 BOTAS STARTUOJA ---")
 
 GEMINI_KEY  = os.getenv("GEMINI_API_KEY")
 WP_USER     = os.getenv("WP_USERNAME")
 WP_PASS     = os.getenv("WP_APP_PASS")
 WP_BASE_URL = "https://politiciannetworth.com/wp-json"
 
-# ── Greitesnis ir stabilesnis modelis ─────────────────────────────────────────
-MODEL_ID    = "gemini-2.0-flash"
+# Modelis bus nustatytas automatiškai per check_models.py
+# Jei nori fiksuoti – pakeisk čia:
+MODEL_ID    = "gemini-2.0-flash-lite"  # fallback, bus perrašytas jei rastas geresnis
 GEMINI_URL  = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_ID}:generateContent?key={GEMINI_KEY}"
 
 WP_TIMEOUT     = 30
 IMG_TIMEOUT    = 20
-GEMINI_TIMEOUT = 60   # 2.0-flash turi atsakyti per 60s
+GEMINI_TIMEOUT = 60
 
-WEALTH_OPTIONS = ["Stock Market Investments", "Real Estate Holdings", "Venture Capital",
-                  "Professional Law Practice", "Family Inheritance"]
+WEALTH_OPTIONS = [
+    "Stock Market Investments", "Real Estate Holdings", "Venture Capital",
+    "Professional Law Practice", "Family Inheritance"
+]
 CAT_MAP = {
     "US Senate": 1, "US House of Representatives": 2,
     "Executive Branch": 3, "State Governors": 4, "United States (USA)": 19
@@ -32,6 +35,38 @@ CAT_MAP = {
 stats = {"ok": 0, "fail": 0, "skip": 0}
 
 
+# ── Automatiškai randame geriausią modelį ─────────────────────────────────────
+def detect_best_model():
+    preferred = [
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-lite",
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-8b",
+    ]
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_KEY}"
+        res = requests.get(url, timeout=15).json()
+        available = [
+            m["name"].replace("models/", "")
+            for m in res.get("models", [])
+            if "generateContent" in m.get("supportedGenerationMethods", [])
+        ]
+        print(f"  📋 Rasti modeliai: {available}")
+        for model in preferred:
+            if model in available:
+                print(f"  ✅ Naudosime: {model}")
+                return model
+        # Jei nė vienas nerastas – imame pirmą flash
+        for m in available:
+            if "flash" in m:
+                print(f"  ✅ Naudosime (fallback): {m}")
+                return m
+    except Exception as e:
+        print(f"  ⚠️ Modelių tikrinimas nepavyko: {e}")
+    return MODEL_ID  # fallback
+
+
+# ── Wikipedia nuotrauka ────────────────────────────────────────────────────────
 def get_wiki_image(name):
     print(f"    [1/4] 🌐 Wikipedia nuotrauka...")
     try:
@@ -49,6 +84,7 @@ def get_wiki_image(name):
     return None
 
 
+# ── Nuotraukos įkėlimas į WP ──────────────────────────────────────────────────
 def upload_image_to_wp(name, img_url):
     print(f"    [2/4] 📤 Keliame nuotrauką į WP...")
     try:
@@ -75,25 +111,28 @@ def upload_image_to_wp(name, img_url):
     return None
 
 
-def call_gemini_with_retry(prompt, retries=4):
+# ── Gemini užklausa ───────────────────────────────────────────────────────────
+def call_gemini_with_retry(prompt, model_url, retries=4):
     delay = 15
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
             "temperature": 0.7,
-            "maxOutputTokens": 2048   # Ribojame outputą – greičiau atsako
+            "maxOutputTokens": 2048
         },
         "safetySettings": [
             {"category": c, "threshold": "BLOCK_NONE"}
-            for c in ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH",
-                      "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]
+            for c in [
+                "HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH",
+                "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"
+            ]
         ]
     }
     for i in range(retries):
         try:
             print(f"    [3/4] ⏳ Gemini bandymas {i+1}/{retries}...")
             t0 = time.time()
-            response = requests.post(GEMINI_URL, json=payload, timeout=GEMINI_TIMEOUT)
+            response = requests.post(model_url, json=payload, timeout=GEMINI_TIMEOUT)
             elapsed = round(time.time() - t0, 1)
             print(f"    [3/4] 📡 Atsakė per {elapsed}s – statusas: {response.status_code}")
 
@@ -105,7 +144,7 @@ def call_gemini_with_retry(prompt, retries=4):
                 time.sleep(delay)
                 delay = min(delay * 2, 120)
             elif response.status_code == 404:
-                print(f"    [3/4] 🚨 Modelis '{MODEL_ID}' nerastas!")
+                print(f"    [3/4] 🚨 Modelis nerastas (404)!")
                 break
             else:
                 print(f"    [3/4] ❌ Klaida {response.status_code}: {response.text[:200]}")
@@ -113,7 +152,7 @@ def call_gemini_with_retry(prompt, retries=4):
 
         except requests.exceptions.Timeout:
             elapsed = round(time.time() - t0, 1)
-            print(f"    [3/4] ⏱️ TIMEOUT po {elapsed}s! Bandymas {i+1}/{retries}. Laukiam {delay}s...")
+            print(f"    [3/4] ⏱️ TIMEOUT po {elapsed}s! Laukiam {delay}s...")
             time.sleep(delay)
             delay = min(delay * 2, 120)
         except Exception as e:
@@ -124,18 +163,21 @@ def call_gemini_with_retry(prompt, retries=4):
     return None
 
 
+# ── JSON parsinavimas ─────────────────────────────────────────────────────────
 def parse_json_from_gemini(text):
     # 1. ```json ... ``` blokas
     md = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
     if md:
         return json.loads(md.group(1))
-    # 2. Pirmasis { ... } blokas
+    # 2. { ... } blokas
     brace = re.search(r"\{.*\}", text, re.DOTALL)
     if brace:
         return json.loads(brace.group())
+    # 3. Tiesiogiai
     return json.loads(text)
 
 
+# ── Straipsnio įkėlimas į WP ──────────────────────────────────────────────────
 def post_to_wp(name, data, img_id):
     print(f"    [4/4] 📝 Keliame į WordPress...")
     sources_html = "".join([
@@ -169,7 +211,8 @@ def post_to_wp(name, data, img_id):
             )
             print(f"    [4/4] 📡 WP atsakė: {wp_res.status_code}")
             if wp_res.status_code == 201:
-                print(f"    [4/4] ✅ Straipsnis įkeltas!")
+                url = wp_res.json().get("link", "")
+                print(f"    [4/4] ✅ Įkeltas! {url}")
                 return True
             elif wp_res.status_code in (500, 502, 503, 504):
                 print(f"    [4/4] ⚠️ WP serverio klaida. Laukiam {10*(attempt+1)}s...")
@@ -188,7 +231,8 @@ def post_to_wp(name, data, img_id):
     return False
 
 
-def run_wealth_bot(politician_name):
+# ── Pagrindinis ciklas ────────────────────────────────────────────────────────
+def run_wealth_bot(politician_name, model_url):
     num = stats['ok'] + stats['fail'] + stats['skip'] + 1
     print(f"\n{'='*55}")
     print(f"💎 [{num}] {politician_name}")
@@ -200,25 +244,25 @@ def run_wealth_bot(politician_name):
     if wiki_img:
         img_id = upload_image_to_wp(politician_name, wiki_img)
 
-    # 2. Gemini – TRUMPESNIS promptas = greitesnis atsakas
+    # 2. Gemini
     prompt = (
         f"Write a 900-word financial article on {politician_name} net worth in 2026. "
-        f"Use H2/H3 HTML tags. Bold key facts.\n\n"
+        f"Use H2/H3 HTML tags. Bold key facts with <strong> tags.\n\n"
         f"Respond ONLY with this JSON, no extra text, no markdown:\n"
         f'{{"article":"<h2>...</h2>...","net_worth":"$XM","job_title":"Title",'
         f'"history":"2020:XM,2026:XM","urls":["https://ballotpedia.org/..."],'
         f'"wealth_sources":["Real Estate"],"assets":"brief text",'
-        f'"seo_title":"SEO title","seo_desc":"SEO desc under 160 chars",'
+        f'"seo_title":"SEO title under 60 chars","seo_desc":"SEO desc under 160 chars",'
         f'"cats":["US Senate"]}}'
     )
 
-    res = call_gemini_with_retry(prompt)
+    res = call_gemini_with_retry(prompt, model_url)
     if not res or "candidates" not in res:
         print(f"  🚨 PRALEISTA: {politician_name}")
         stats["skip"] += 1
         return
 
-    # 3. JSON parsinavimas
+    # 3. JSON
     try:
         full_text = res["candidates"][0]["content"]["parts"][0]["text"]
         print(f"    [3/4] 🔍 Atsakymo ilgis: {len(full_text)} simbolių")
@@ -239,10 +283,17 @@ def run_wealth_bot(politician_name):
         print(f"  💀 NEPAVYKO: {politician_name}")
 
 
+# ── Startas ───────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     if not os.path.exists("names.txt"):
         print("❌ names.txt nerastas!")
         sys.exit(1)
+
+    # Automatiškai randame veikiantį modelį
+    print("\n🔍 Ieškome geriausio Gemini modelio...")
+    best_model = detect_best_model()
+    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{best_model}:generateContent?key={GEMINI_KEY}"
+    print(f"🤖 Modelis: {best_model}\n")
 
     with open("names.txt", "r") as f:
         names = [n.strip() for n in f if n.strip()]
@@ -250,7 +301,7 @@ if __name__ == "__main__":
     print(f"📋 Vardų skaičius: {len(names)}")
 
     for i, name in enumerate(names):
-        run_wealth_bot(name)
+        run_wealth_bot(name, gemini_url)
 
         if i < len(names) - 1:
             pause = 20 if (i + 1) % 10 == 0 else 8
