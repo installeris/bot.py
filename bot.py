@@ -1,62 +1,6 @@
-import os
-import requests
-import json
-import re
-import time
-import sys
-
-sys.stdout.reconfigure(line_buffering=True)
-
-print("--- 🚀 BOTAS STARTUOJA (Original Base + Your Fixes) ---")
-
-GEMINI_KEY = os.getenv("GEMINI_API_KEY")
-WP_USER = os.getenv("WP_USERNAME")
-WP_PASS = os.getenv("WP_APP_PASS")
-WP_BASE_URL = "https://politiciannetworth.com/wp-json"
-
-# Naudojame tavo nurodytą modelį
-MODEL_ID = "gemini-2.5-flash" 
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_ID}:generateContent?key={GEMINI_KEY}"
-
-WEALTH_OPTIONS = ["Stock Market Investments", "Real Estate Holdings", "Venture Capital", "Professional Law Practice", "Family Inheritance"]
-# Sutvarkytas kategorijų žemėlapis pagal tavo nurodymus
-CAT_MAP = {
-    "US Senate": 1, 
-    "US House of Representatives": 2, 
-    "Executive Branch": 3, 
-    "State Governors": 4, 
-    "United States (USA)": 19,
-    "Politician Wealth": 22, # Tavo kategorija
-    "Congress Trades": 21     # Tavo kategorija
-}
-
-def get_wiki_image(name):
-    try:
-        # Pridėtas redirects=1, kad tikrai rastų Tammy Baldwin ir kt.
-        url = f"https://en.wikipedia.org/w/api.php?action=query&titles={name}&prop=pageimages&format=json&pithumbsize=1200&redirects=1"
-        res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).json()
-        pages = res.get("query", {}).get("pages", {})
-        for pg in pages:
-            if "thumbnail" in pages[pg]: return pages[pg]["thumbnail"]["source"]
-    except: return None
-
-def call_gemini_with_retry(prompt, retries=5):
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "safetySettings": [{"category": c, "threshold": "BLOCK_NONE"} for c in ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]]
-    }
-    for i in range(retries):
-        try:
-            response = requests.post(GEMINI_URL, json=payload, timeout=60)
-            if response.status_code == 200: return response.json()
-            time.sleep(10)
-        except: time.sleep(10)
-    return None
-
 def run_wealth_bot(politician_name):
     print(f"\n💎 Ruošiamas: {politician_name}")
     
-    # GRIEŽTA TAISYKLĖ: Nėra foto - nėra posto
     wiki_img = get_wiki_image(politician_name)
     if not wiki_img:
         print(f"  ⏭️ PRALEIDŽIAMA: Nuotrauka nerasta.")
@@ -71,18 +15,21 @@ def run_wealth_bot(politician_name):
     except: pass
     
     if not img_id:
-        print(f"  ⏭️ PRALEIDŽIAMA: Nepavyko įkelti nuotraukos į WP.")
+        print(f"  ⏭️ PRALEIDŽIAMA: Nepavyko įkelti nuotraukos.")
         return
 
-    # Tavo prašytas PROMPTAS: 700-900 žodžių, tikra info, be AI stiliaus
+    # PATOBULINTAS PROMPTAS: Milijonai, Įdomūs faktai ir SEO
     prompt = (
-        f"Write a 800-word informative financial article about {politician_name} for 2026. \n"
-        f"INSTRUCTIONS: Use verified data from OpenSecrets and Ballotpedia. Avoid AI-sounding phrases. \n"
-        f"CHART DATA: Provide a realistic net worth progression (e.g., 2019, 2021, 2023, 2025, 2026). \n"
-        f"Return ONLY JSON: {{\"article\": \"HTML\", \"net_worth\": \"$X.M\", \"job_title\": \"Official Role\", "
-        f"\"history\": \"2019:Value,2022:Value,2026:Value\", \"urls\": [\"URL1\", \"URL2\"], "
-        f"\"wealth_sources\": [], \"assets\": \"Specific Assets\", \"seo_title\": \"SEO Title\", "
-        f"\"seo_desc\": \"SEO Description\", \"cats\": [\"United States (USA)\", \"Politician Wealth\"]}}"
+        f"Write an 850-word high-authority financial profile for {politician_name} (2026 update). \n"
+        f"STYLE: Conversational, expert, not boring. Use H2/H3, **bolding**, and bullet points. \n"
+        f"CONTENT: Include a 'Key Financial Milestones' section with interesting facts and a detailed net worth history (2018-2026). \n"
+        f"IMPORTANT: Net worth MUST be in Millions (e.g., $5.4M, $12.8M). Do not use small numbers. \n"
+        f"SELECT: Choose exactly 2 items for wealth_sources from: {WEALTH_OPTIONS}. \n"
+        f"SELECT: Choose max 2 major assets for the 'assets' field. \n"
+        f"Return ONLY JSON: {{\"article\": \"HTML\", \"net_worth\": \"$10.5M\", \"job\": \"Senator\", "
+        f"\"history\": \"2018:$4M,2021:$7M,2024:$9M,2026:$10.5M\", \"urls\": [\"URL1\"], "
+        f"\"wealth_sources\": [\"Stock Market Investments\", \"Real Estate Holdings\"], "
+        f"\"assets\": \"Stock Portfolio, Residential Property\", \"seo_title\": \"Title\", \"seo_desc\": \"Desc\", \"cats\": [\"United States (USA)\"]}}"
     )
 
     res = call_gemini_with_retry(prompt)
@@ -92,27 +39,26 @@ def run_wealth_bot(politician_name):
             json_str = re.search(r'\{.*\}', full_text, re.DOTALL).group()
             data = json.loads(json_str)
             
-            # Gražus šaltinių atvaizdavimas pagal tavo prašymą
+            # Šaltinių HTML
             sources_html = "<strong>Financial Data Sources:</strong><ul>"
             for u in data.get("urls", []):
                 sources_html += f'<li><a href="{u}" target="_blank" rel="nofollow noopener">{u}</a></li>'
             sources_html += "</ul>"
 
             payload = {
-                "title": f"{politician_name} Net Worth 2026: Portfolio & Trades",
+                "title": f"{politician_name} Net Worth 2026: Financial Strategy & Portfolio",
                 "content": data["article"],
                 "status": "publish",
                 "featured_media": img_id,
                 "categories": [CAT_MAP[c] for c in data.get("cats", []) if c in CAT_MAP],
                 "acf": {
-                    "job_title": data.get("job_title", ""),
-                    "net_worth": data.get("net_worth", ""),
+                    "job_title": data.get("job", ""),
+                    "net_worth": data.get("net_worth", ""), # Čia dabar bus $10.5M, o ne $1
                     "net_worth_history": data.get("history", ""),
-                    "source_of_wealth": [s for s in data.get("wealth_sources", []) if s in WEALTH_OPTIONS][:2],
-                    "main_assets": data.get("assets", ""),
-                    "sources": sources_html # Gražiai suformuotas sąrašas
+                    "source_of_wealth": data.get("wealth_sources", [])[:2], # Čia užpildo checkboxus
+                    "main_assets": data.get("assets", ""), # Tik 1-2 pagrindiniai
+                    "sources": sources_html
                 },
-                # Rank Math laukai dabar užpildyti!
                 "rank_math_title": data.get("seo_title", ""),
                 "rank_math_description": data.get("seo_desc", ""),
                 "rank_math_focus_keyword": f"{politician_name} net worth"
@@ -120,15 +66,8 @@ def run_wealth_bot(politician_name):
             
             wp_res = requests.post(f"{WP_BASE_URL}/wp/v2/posts", json=payload, auth=(WP_USER, WP_PASS))
             if wp_res.status_code == 201:
-                print(f"  ✅ SĖKMĖ: {politician_name} paskelbtas!")
+                print(f"  ✅ SĖKMĖ: {politician_name} (Net Worth: {data.get('net_worth')})")
             else:
                 print(f"  ❌ WP Klaida: {wp_res.text}")
         except Exception as e:
             print(f"  🚨 Klaida: {e}")
-
-if __name__ == "__main__":
-    if os.path.exists("names.txt"):
-        with open("names.txt", "r") as f:
-            for name in [n.strip() for n in f if n.strip()]:
-                run_wealth_bot(name)
-                time.sleep(10)
