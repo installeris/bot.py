@@ -7,7 +7,7 @@ import sys
 
 sys.stdout.reconfigure(line_buffering=True)
 
-print("--- 🚀 BOTAS STARTUOJA ---")
+print("--- BOTAS STARTUOJA ---")
 
 GEMINI_KEY  = os.getenv("GEMINI_API_KEY")
 WP_USER     = os.getenv("WP_USERNAME")
@@ -16,7 +16,7 @@ WP_BASE_URL = "https://politiciannetworth.com/wp-json"
 
 WP_TIMEOUT     = 30
 IMG_TIMEOUT    = 20
-GEMINI_TIMEOUT = 60
+GEMINI_TIMEOUT = 90
 
 WEALTH_OPTIONS = [
     "Stock Market Investments", "Real Estate Holdings", "Venture Capital",
@@ -69,7 +69,6 @@ def find_gemini_url():
         chosen = "gemini-2.0-flash-001"
 
     print(f"  Bandysime modeli: {chosen}")
-
     test_payload = {"contents": [{"parts": [{"text": "Hi"}]}]}
     for version in ["v1beta", "v1"]:
         url = f"https://generativelanguage.googleapis.com/{version}/models/{chosen}:generateContent?key={GEMINI_KEY}"
@@ -77,7 +76,7 @@ def find_gemini_url():
             r = requests.post(url, json=test_payload, timeout=20)
             print(f"  {version} -> {r.status_code}")
             if r.status_code in (200, 400):
-                print(f"  Modelis veikia! Naudosime: {version}")
+                print(f"  Naudosime: {version}")
                 return url
         except Exception as e:
             print(f"  {version} klaida: {e}")
@@ -95,7 +94,6 @@ def find_gemini_url():
             print(f"  {model}: {e}")
 
     print("KLAIDA: Nepavyko rasti veikiancio Gemini URL!")
-    print("Patikrink: 1) GEMINI_API_KEY secrets 2) Google AI Studio rakto galiojima")
     sys.exit(1)
 
 
@@ -147,7 +145,7 @@ def call_gemini(prompt, gemini_url, retries=4):
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
-            "temperature": 0.7,
+            "temperature": 0.4,
             "maxOutputTokens": 8192
         },
         "safetySettings": [
@@ -165,7 +163,6 @@ def call_gemini(prompt, gemini_url, retries=4):
             response = requests.post(gemini_url, json=payload, timeout=GEMINI_TIMEOUT)
             elapsed = round(time.time() - t0, 1)
             print(f"    [3/4] Atsake per {elapsed}s - statusas: {response.status_code}")
-
             if response.status_code == 200:
                 print("    [3/4] Gemini OK")
                 return response.json()
@@ -176,7 +173,6 @@ def call_gemini(prompt, gemini_url, retries=4):
             else:
                 print(f"    [3/4] Klaida {response.status_code}: {response.text[:200]}")
                 break
-
         except requests.exceptions.Timeout:
             print(f"    [3/4] TIMEOUT! Laukiam {delay}s...")
             time.sleep(delay)
@@ -184,77 +180,89 @@ def call_gemini(prompt, gemini_url, retries=4):
         except Exception as e:
             print(f"    [3/4] Iskimtis: {e}")
             break
-
     print("    [3/4] Visi Gemini bandymai nepavyko")
     return None
 
 
 def parse_json(text):
-    # 1. Bandome tiesiogiai
-    try:
-        return json.loads(text)
-    except:
-        pass
-
-    # 2. ```json ... ``` blokas
+    for attempt in [text, text.strip()]:
+        try:
+            return json.loads(attempt)
+        except:
+            pass
     md = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
     if md:
         try:
             return json.loads(md.group(1))
         except:
             pass
-
-    # 3. Randame { ir paskutinį } - imame viską tarp jų
     start = text.find('{')
     end = text.rfind('}')
     if start != -1 and end != -1:
-        candidate = text[start:end+1]
         try:
-            return json.loads(candidate)
+            return json.loads(text[start:end+1])
         except:
             pass
+    raise ValueError(f"Nepavyko parsinuoti JSON. Pradzia: {text[:300]}")
 
-    # 4. Jei HTML article lauke yra neescaped kabutelės - bandome jas pataisyti
-    # Randame "article": "..." ir escapiname vidų
-    def fix_json_string(raw):
-        # Pakeičiame kontrolinius simbolius
-        raw = raw.replace("\r\n", "\\n").replace("\n", "\\n").replace("\t", "\\t")
-        return raw
 
-    start = text.find('{')
-    end = text.rfind('}')
-    if start != -1 and end != -1:
-        candidate = fix_json_string(text[start:end+1])
-        try:
-            return json.loads(candidate)
-        except:
-            pass
-
-    raise ValueError(f"Nepavyko parsinuoti JSON. Tekstas prasideda: {text[:200]}")
+def format_sources_html(urls):
+    """Grazus saltiniai su domeno pavadinimu kaip tekstu."""
+    items = []
+    for url in urls:
+        # Isimame domeno pavadinima kaip display teksta
+        domain = re.sub(r"https?://(www\.)?", "", url).split("/")[0]
+        items.append(f'<li><a href="{url}" target="_blank" rel="nofollow noopener">{domain}</a></li>')
+    return "<ul>" + "".join(items) + "</ul>"
 
 
 def post_to_wp(name, data, img_id):
     print("    [4/4] Keliame i WordPress...")
-    sources_html = "".join([
-        f'<li><a href="{u}" target="_blank" rel="nofollow noopener">{u}</a></li>'
-        for u in data.get("urls", [])
-    ])
+
+    # Kategorijos - imame iki 2
+    cats = [CAT_MAP[c] for c in data.get("cats", []) if c in CAT_MAP][:2]
+    # Jei tik 1 kategorija rasta - pridedame "United States (USA)" kaip antra
+    if len(cats) == 1:
+        if 19 not in cats:
+            cats.append(19)
+
+    # Source of wealth - tiksliai is WEALTH_OPTIONS saraso
+    raw_sources = data.get("wealth_sources", [])
+    matched_sources = [s for s in raw_sources if s in WEALTH_OPTIONS][:2]
+
+    # Net worth - isvalome, paliekame tik skaiciaus formata
+    net_worth = data.get("net_worth", "")
+
+    # History - tikslus formatas: "2022:2M,2023:2.5M,2024:3M,2025:3.5M,2026:4M"
+    history = data.get("history", "")
+
+    # Assets - trumpas tekstas, tik pagrindiniai 1-2 saltiniai
+    assets = data.get("assets", "")
+
+    # SEO laukeliai
+    seo_title = data.get("seo_title", f"{name} Net Worth 2026")
+    seo_desc  = data.get("seo_desc", f"Learn about {name}'s net worth, assets, and financial portfolio in 2026.")
+
+    sources_html = format_sources_html(data.get("urls", []))
+
     payload = {
-        "title": f"{name} Net Worth 2026: Financial Portfolio & Assets",
-        "content": data["article"],
-        "status": "publish",
+        "title":          f"{name} Net Worth 2026: Financial Portfolio & Assets",
+        "content":        data["article"],
+        "status":         "publish",
         "featured_media": img_id,
-        "categories": [CAT_MAP[c] for c in data.get("cats", []) if c in CAT_MAP][:2],
+        "categories":     cats,
         "acf": {
             "job_title":         data.get("job_title", ""),
-            "net_worth":         data.get("net_worth", ""),
-            "net_worth_history": data.get("history", ""),
-            "source_of_wealth":  [s for s in data.get("wealth_sources", []) if s in WEALTH_OPTIONS][:2],
-            "main_assets":       data.get("assets", ""),
-            "sources":           f"<ul>{sources_html}</ul>"
+            "net_worth":         net_worth,
+            "net_worth_history": history,
+            "source_of_wealth":  matched_sources,
+            "main_assets":       assets,
+            "sources":           sources_html
         },
-        "rank_math_title":       data.get("seo_title", ""),
-        "rank_math_description": data.get("seo_desc", "")
+        "meta": {
+            "rank_math_title":       seo_title,
+            "rank_math_description": seo_desc,
+        }
     }
 
     for attempt in range(3):
@@ -281,9 +289,29 @@ def post_to_wp(name, data, img_id):
         except Exception as e:
             print(f"    [4/4] Iskimtis: {e}")
             return False
-
     print("    [4/4] Visi WP bandymai nepavyko")
     return False
+
+
+def build_prompt(name):
+    return f"""You are writing a financial profile article for the website politiciannetworth.com.
+
+Write a 700-900 word article about {name}'s net worth in 2026.
+- Use simple language that any reader can understand. Do NOT sound like AI.
+- Include 1-2 interesting personal facts or lesser-known details about their career or background.
+- Use <h2> and <h3> HTML tags for sections. Use <strong> for key numbers.
+- Base net worth estimates ONLY on verified public sources: OpenSecrets, Ballotpedia, financial disclosures, Forbes, or major news outlets.
+- For net_worth_history: find realistic yearly estimates for 2022, 2023, 2024, 2025, 2026 from public financial disclosures. Format: "2022:XM,2023:XM,2024:XM,2025:XM,2026:XM" where X is a number in millions (e.g. 2022:1.2M).
+- For wealth_sources: pick ONLY from this exact list (max 2): ["Stock Market Investments", "Real Estate Holdings", "Venture Capital", "Professional Law Practice", "Family Inheritance"]
+- For assets: write 1 sentence naming the 1-2 main asset types only (e.g. "Investment portfolio and primary residence in Wisconsin.")
+- For cats: pick up to 2 from: ["US Senate", "US House of Representatives", "Executive Branch", "State Governors", "United States (USA)"]
+- seo_title must be under 60 characters.
+- seo_desc must be under 155 characters and include the politician's name and net worth year.
+- urls: include 2-3 real, working URLs from opensecrets.org, ballotpedia.org, or senate.gov/house.gov only.
+
+Respond ONLY with valid JSON. No markdown. No extra text. No trailing commas.
+
+{{"article":"<h2>...</h2><p>...</p>","net_worth":"$XM","job_title":"U.S. Senator","history":"2022:XM,2023:XM,2024:XM,2025:XM,2026:XM","urls":["https://ballotpedia.org/...","https://opensecrets.org/..."],"wealth_sources":["Real Estate Holdings","Stock Market Investments"],"assets":"One sentence about main assets only.","seo_title":"{name} Net Worth 2026","seo_desc":"{name} net worth in 2026 estimated at $XM. Learn about their financial portfolio and assets.","cats":["US Senate","United States (USA)"]}}"""
 
 
 def run_wealth_bot(politician_name, gemini_url):
@@ -297,16 +325,7 @@ def run_wealth_bot(politician_name, gemini_url):
     if wiki_img:
         img_id = upload_image_to_wp(politician_name, wiki_img)
 
-    prompt = (
-        f"Write a 900-word financial article on {politician_name} net worth in 2026. "
-        f"Use H2/H3 HTML tags. Bold key facts with <strong> tags.\n\n"
-        f"Respond ONLY with valid JSON, no markdown, no extra text:\n"
-        f'{{"article":"<h2>...</h2>...","net_worth":"$XM","job_title":"Title",'
-        f'"history":"2020:XM,2026:XM","urls":["https://ballotpedia.org/..."],'
-        f'"wealth_sources":["Real Estate"],"assets":"brief text",'
-        f'"seo_title":"SEO title under 60 chars","seo_desc":"SEO desc under 160 chars",'
-        f'"cats":["US Senate"]}}'
-    )
+    prompt = build_prompt(politician_name)
 
     res = call_gemini(prompt, gemini_url)
     if not res or "candidates" not in res:
@@ -343,7 +362,7 @@ if __name__ == "__main__":
 
     print("\nIeskome veikiancio Gemini URL...")
     gemini_url = find_gemini_url()
-    print(f"Gemini URL nustatytas.\n")
+    print("Gemini URL nustatytas.\n")
 
     with open("names.txt", "r") as f:
         names = [n.strip() for n in f if n.strip()]
