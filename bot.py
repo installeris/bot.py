@@ -185,6 +185,7 @@ def call_gemini(prompt, gemini_url, retries=4):
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": 0.3, "maxOutputTokens": 16384},
+        "tools": [{"google_search": {}}],
         "safetySettings": [
             {"category": c, "threshold": "BLOCK_NONE"}
             for c in ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH",
@@ -434,7 +435,7 @@ history: their REAL estimated net worth for each year 2022-2026 as plain integer
   Example for someone worth $50M: "2022:35000000,2023:40000000,2024:44000000,2025:47000000,2026:50000000"
 
 wealth_sources: analyze HOW this specific person actually made their money.
-  Pick 1-2 that TRULY apply to THIS person from this list: [{wealth_list}]
+  Pick 1-4 that TRULY apply to THIS person from this list: [{wealth_list}]
   Think carefully - a lawyer turned senator picks "Professional Law Practice", a tech investor picks "Stock Market Investments", someone with inherited money picks "Family Inheritance".
 
 assets: ONE sentence describing THIS person's actual main assets. Be specific. Example: "Primary home in Wisconsin and a diversified mutual fund portfolio." NOT a generic description.
