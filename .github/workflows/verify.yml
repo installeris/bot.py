@@ -1,0 +1,30 @@
+name: Verify Net Worth
+on:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install requests
+      - name: Verify net worth accuracy
+        env:
+          PYTHONUNBUFFERED: "1"
+          WP_USERNAME: ${{ secrets.WP_USERNAME }}
+          WP_APP_PASS: ${{ secrets.WP_APP_PASS }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python verify_bot.py
+      - name: Upload results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: verification-results
+          path: |
+            to_fix.txt
+            names_to_rewrite.txt
