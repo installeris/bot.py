@@ -280,28 +280,29 @@ def parse_json(text):
         try: return json.loads(t)
         except: pass
 
-    # 2. Ištraukiame article lauką atskirai ir pakeičiame vidines kabutes
-    # (Gemini dažnai rašo "The Art of the Deal" su kabutėmis article viduje)
+    # 2. Ištraukiame article lauką ir pakeičiame vidines kabutes
+    # Gemini rašo: "The Art of the Deal" su kabutėmis article viduje - tai laužo JSON
+    tw = text_fixed  # default
     m = re.search(r'\{"article"\s*:\s*"(.*?)",\s*"net_worth"', text_fixed, re.DOTALL)
     if m:
         art_clean = m.group(1).replace('"', "'")
-        text_art_fixed = text_fixed[:m.start(1)] + art_clean + text_fixed[m.end(1):]
+        tw = text_fixed[:m.start(1)] + art_clean + text_fixed[m.end(1):]
         try:
-            return json.loads(text_art_fixed)
+            return json.loads(tw)
         except json.JSONDecodeError as e:
-            snippet = text_art_fixed[max(0, e.pos-30):e.pos+30]
-            print(f"    Article fix sonra klaida pos={e.pos}: {repr(snippet)}")
+            snippet = tw[max(0, e.pos-30):e.pos+30]
+            print(f"    Article fix klaida pos={e.pos}: {repr(snippet)}")
 
     # 3. Nuo { iki paskutinio }
-    s = text_html.find("{")
-    e = text_html.rfind("}")
+    s = tw.find("{")
+    e = tw.rfind("}")
     if s != -1 and e != -1 and e > s:
-        try: return json.loads(text_html[s:e+1])
+        try: return json.loads(tw[s:e+1])
         except: pass
 
     # 4. Nupjautas JSON - karpome nuo galo, grąžiname geriausią
     if s != -1:
-        chunk = text_html[s:]
+        chunk = tw[s:]
         best = None
         best_fields = 0
         for _ in range(30):
