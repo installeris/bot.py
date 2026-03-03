@@ -280,14 +280,17 @@ def parse_json(text):
         try: return json.loads(t)
         except: pass
 
-    # 2. Fix HTML href quotes ("url" -> 'url') ir bandome vėl
-    text_html = fix_html_quotes_in_json(text_fixed)
-    try:
-        return json.loads(text_html)
-    except json.JSONDecodeError as e:
-        # Logname tikslią vietą
-        snippet = text_html[max(0, e.pos-40):e.pos+40]
-        print(f"    Parse klaida pos={e.pos}: {repr(snippet)}")
+    # 2. Ištraukiame article lauką atskirai ir pakeičiame vidines kabutes
+    # (Gemini dažnai rašo "The Art of the Deal" su kabutėmis article viduje)
+    m = re.search(r'\{"article"\s*:\s*"(.*?)",\s*"net_worth"', text_fixed, re.DOTALL)
+    if m:
+        art_clean = m.group(1).replace('"', "'")
+        text_art_fixed = text_fixed[:m.start(1)] + art_clean + text_fixed[m.end(1):]
+        try:
+            return json.loads(text_art_fixed)
+        except json.JSONDecodeError as e:
+            snippet = text_art_fixed[max(0, e.pos-30):e.pos+30]
+            print(f"    Article fix sonra klaida pos={e.pos}: {repr(snippet)}")
 
     # 3. Nuo { iki paskutinio }
     s = text_html.find("{")
@@ -320,13 +323,12 @@ def parse_json(text):
             print(f"    JSON iš dalies atkurtas ({best_fields} laukai)")
             return best
 
-    # 5. Paskutinis bandymas - regex (tik jei turime svarbiausius laukus)
+    # 5. Paskutinis fallback - regex
     print("    Bandome regex extraction...")
     result = extract_fields_by_regex(text)
-    if result and result.get("article") and result.get("net_worth") and result.get("history"):
-        print(f"    Regex OK: {len(result)} laukai - bet kelsime iš naujo Gemini")
-        # Negrąžiname regex rezultato - verčiau bandome Gemini dar kartą
-        raise ValueError(f"JSON parse nepavyko (HTML quotes problema) - reikia retry")
+    if result:
+        print(f"    Regex OK: {len(result)} laukai")
+        return result
 
     raise ValueError(f"Nepavyko parse JSON: {text[:300]}")
 
