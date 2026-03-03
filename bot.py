@@ -123,6 +123,7 @@ def call_gemini(prompt, gemini_url, retries=4):
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": 0.25, "maxOutputTokens": 32768},
+        "tools": [{"google_search": {}}],
         "safetySettings": [{"category": c, "threshold": "BLOCK_NONE"} for c in
             ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH",
              "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]]
@@ -546,6 +547,8 @@ def build_prompt(name):
     seo_angle = random.choice(seo_angles)
 
     return f"""You are an investigative financial journalist. Write a deeply researched, unique financial profile of {name} for a general audience.
+
+CRITICAL — NET WORTH ACCURACY: Use your Google Search tool RIGHT NOW to find the latest 2025-2026 net worth for {name}. Search: "{name} net worth 2025 Forbes". Training data is outdated — always use search results for the actual figure. Net worths change drastically (e.g. Trump went from $3B to $7B+ after Truth Social IPO).
 
 RULES:
 - Article MUST be 950-1150 words
