@@ -678,31 +678,66 @@ def run_bot(name, gemini_url):
     if wiki_img:
         img_id, img_url_val = upload_image_to_wp(name, wiki_img)
 
-    res = call_gemini(build_prompt(name), gemini_url)
-    if not res or "candidates" not in res:
-        stats["skip"] += 1; return
-
-    try:
+    def extract_data(res):
+        """Ištraukia ir patikrina JSON iš Gemini atsakymo"""
+        if not res or "candidates" not in res:
+            return None, "no candidates"
         cand = res["candidates"][0]
         reason = cand.get("finishReason","UNKNOWN")
-        text = cand["content"]["parts"][0]["text"].strip()
+        try:
+            text = cand["content"]["parts"][0]["text"].strip()
+        except (KeyError, IndexError):
+            return None, "no text in response"
         print(f"    {len(text)} simboliu, reason: {reason}")
         if reason == "MAX_TOKENS":
-            print("    Nupjautas!")
-            stats["fail"] += 1
-            with open("failed.txt","a") as f: f.write(name+"\n")
-            return
-        # Jei Gemini pridėjo įvadinį tekstą prieš JSON - praleidžiame
+            return None, "MAX_TOKENS - nupjautas"
         if not text.startswith("{"):
             brace = text.find("{")
             if brace != -1:
                 print(f"    Įvadinis tekstas ({brace} chars) - ieškome JSON...")
                 text = text[brace:]
             else:
-                raise ValueError(f"Nėra JSON objecto atsakyme: {text[:200]}")
-        data = parse_json(text)
-    except Exception as e:
-        print(f"  JSON klaida: {e}")
+                return None, f"nera JSON: {text[:100]}"
+        try:
+            return parse_json(text), None
+        except Exception as e:
+            return None, str(e)
+
+    def check_fields(d):
+        """Patikrina ar visi kritiniai laukai užpildyti"""
+        missing = []
+        if not d.get("article") or len(d.get("article","")) < 500:
+            missing.append(f"article per trumpas ({len(d.get('article',''))} chars)")
+        nw = str(d.get("net_worth","")).strip()
+        if not nw or nw in ("0","INT",""):
+            missing.append("net_worth tuscias")
+        hist = d.get("history","")
+        if not hist or hist in ("","2022:INT,2023:INT,2024:INT,2025:INT,2026:INT"):
+            missing.append("history tuscia")
+        if not d.get("job_title","").strip():
+            missing.append("job_title tuscias")
+        return missing
+
+    # Bandome iki 3 kartu gauti pilnus duomenis
+    data = None
+    for attempt in range(3):
+        if attempt > 0:
+            print(f"    Pakartojame Gemini ({attempt+1}/3) - truko laukų...")
+            time.sleep(8)
+        res = call_gemini(build_prompt(name), gemini_url)
+        data, err = extract_data(res)
+        if err:
+            print(f"  Klaida: {err}")
+            continue
+        missing = check_fields(data)
+        if not missing:
+            print(f"    Visi laukai OK")
+            break
+        print(f"    Trūksta: {', '.join(missing)}")
+        data = None  # Bandome iš naujo
+
+    if data is None:
+        print(f"  NEPAVYKO gauti pilnų duomenų po 3 bandymų")
         stats["fail"] += 1
         with open("failed.txt","a") as f: f.write(name+"\n")
         return
