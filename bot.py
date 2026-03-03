@@ -78,32 +78,51 @@ stats = {"ok": 0, "fail": 0, "skip": 0}
 
 
 def find_gemini_url():
-    preferred = ["gemini-2.0-flash-001", "gemini-2.0-flash-lite-001",
-                 "gemini-2.0-flash", "gemini-flash-latest", "gemini-1.5-flash"]
+    preferred = [
+        "gemini-2.0-flash-001", "gemini-2.0-flash-lite-001",
+        "gemini-2.0-flash", "gemini-2.0-flash-lite",
+        "gemini-flash-latest", "gemini-1.5-flash-latest", "gemini-1.5-flash"
+    ]
     print("  Gauname modeliu sarasa...")
+    available = []
     try:
         res = requests.get(
             f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_KEY}",
             timeout=15).json()
         available = [m["name"].replace("models/", "") for m in res.get("models", [])
                      if "generateContent" in m.get("supportedGenerationMethods", [])]
+        print(f"  Rasti: {available[:5]}")
     except Exception as e:
         print(f"  Klaida: {e}")
-        available = []
+
     chosen = next((p for p in preferred if p in available), None) or \
-             next((m for m in available if "flash" in m.lower()), "gemini-2.0-flash-001")
+             next((m for m in available if "flash" in m.lower()), "gemini-2.0-flash")
     print(f"  Naudosime: {chosen}")
+
     test_payload = {"contents": [{"parts": [{"text": "Hi"}]}]}
     for version in ["v1beta", "v1"]:
         url = f"https://generativelanguage.googleapis.com/{version}/models/{chosen}:generateContent?key={GEMINI_KEY}"
         try:
             r = requests.post(url, json=test_payload, timeout=20)
-            if r.status_code in (200, 400):
+            print(f"  {version} -> {r.status_code}")
+            if r.status_code in (200, 400, 403):
+                return url
+        except Exception as e:
+            print(f"  {version} klaida: {e}")
+
+    for model in available[:10]:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_KEY}"
+        try:
+            r = requests.post(url, json=test_payload, timeout=20)
+            if r.status_code in (200, 400, 403):
+                print(f"  Rastas: {model}")
                 return url
         except:
             pass
-    print("KLAIDA: Nepavyko rasti Gemini URL!")
-    sys.exit(1)
+
+    # Hardcoded fallback
+    print("  Naudojame fallback URL")
+    return f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_KEY}"
 
 
 def get_wiki_image(name):
