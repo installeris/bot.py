@@ -424,46 +424,114 @@ def build_references_html(urls):
 </div>"""
 
 def build_prompt(name):
+    import random
     cats_list = ", ".join(CAT_MAP.keys())
     wealth_list = ", ".join(WEALTH_OPTIONS)
-    return f"""You are an experienced financial journalist writing for a general audience. Research {name} and write an accurate, engaging financial profile that reads like a human expert wrote it — not an AI.
+
+    # Skirtingi kampai skirtingiems politikams
+    angle_pool = [
+        f"Focus on the most CONTROVERSIAL or SURPRISING aspect of {name}'s wealth — something that would shock most people.",
+        f"Focus on how {name}'s wealth CHANGED dramatically — a big gain, loss, or unexpected turn.",
+        f"Focus on {name}'s UNLIKELY path to wealth — what most people don't realize about their financial story.",
+        f"Focus on the CONTRAST between {name}'s public image and their actual financial reality.",
+        f"Focus on {name}'s BUSINESS DEALS and investments outside of politics — the money most people overlook.",
+        f"Focus on how {name} BUILT wealth before entering politics — the foundation most people don't know.",
+        f"Focus on {name}'s REAL ESTATE empire or major physical assets — make it tangible and visual.",
+        f"Focus on how {name}'s net worth compares to their POLITICAL PEERS — is it shocking high or surprisingly low?",
+    ]
+    angle = random.choice(angle_pool)
+
+    # Skirtingos struktūros - atsitiktinai parenkamos
+    structures = [
+        # Struktūra 1 - chronologinė
+        f"""ARTICLE STRUCTURE (use this exact order):
+- Opening hook paragraph: {angle}
+- <h2>Early Life and the Road to Politics</h2> — pre-political career, education, first money moves
+- <h2>How {name} Built Their Fortune</h2> — main income sources with specific dollar amounts
+- <h2>Real Estate, Stocks and Key Investments</h2> — named holdings, addresses, ticker symbols where known
+- <h2>Net Worth Timeline: The Numbers Over the Years</h2> — track changes with context, explain spikes/drops
+- <h2>Financial Controversies and Lesser-Known Facts</h2> — something interesting most people don't know""",
+
+        # Struktūra 2 - investigatyvinė
+        f"""ARTICLE STRUCTURE (use this exact order):
+- Opening hook paragraph: {angle}
+- <h2>The Surprising Truth About {name}'s Money</h2> — the headline fact, counterintuitive detail
+- <h2>Income Streams Explained</h2> — every source: salary, books, speeches, businesses, investments
+- <h2>What {name} Actually Owns</h2> — property, stocks, businesses by name and estimated value
+- <h2>Wealth Growth: Year by Year</h2> — what changed and why, major financial events
+- <h2>Background: Before the Spotlight</h2> — pre-fame financial life and career origins""",
+
+        # Struktūra 3 - portretinė
+        f"""ARTICLE STRUCTURE (use this exact order):
+- Opening hook paragraph: {angle}
+- <h2>Who Is {name} Financially?</h2> — quick financial snapshot, key numbers upfront
+- <h2>The Business of Being {name}</h2> — how they monetize their name, platform, career
+- <h2>Assets Worth Knowing About</h2> — concrete holdings with values, not vague descriptions
+- <h2>The Wealth Trajectory</h2> — from early career to today, what drove growth
+- <h2>Quirks, Controversies and Context</h2> — puts wealth in political/personal context""",
+
+        # Struktūra 4 - klausimų/atsakymų stiliaus
+        f"""ARTICLE STRUCTURE (use this exact order):
+- Opening hook paragraph: {angle}
+- <h2>Just How Rich Is {name}?</h2> — net worth figure with source, how it compares to peers
+- <h2>Where the Money Comes From</h2> — income breakdown with actual dollar amounts per source
+- <h2>The Portfolio: Investments and Property</h2> — specific assets, locations, estimated values
+- <h2>A Decade of Wealth: How the Numbers Moved</h2> — historical context with real figures
+- <h2>The Story Behind the Money</h2> — career origins, pivotal financial decisions""",
+    ]
+    structure = random.choice(structures)
+
+    # SEO desc kampai - skirtingi kiekvienam
+    seo_angles = [
+        f"Find out the real story behind {name}'s fortune — the sources, the assets, and the numbers most people miss.",
+        f"How did {name} actually make their money? Full breakdown of income, investments, and net worth in 2026.",
+        f"Surprising facts about {name}'s net worth in 2026 — where it came from, what they own, and how it grew.",
+        f"Complete financial profile of {name}: salary, assets, investments, and estimated net worth for 2026.",
+        f"The full picture of {name}'s wealth — verified figures, key assets, and the financial history behind the number.",
+        f"What is {name} really worth? In-depth look at their income sources, property, stocks and net worth in 2026.",
+    ]
+    seo_angle = random.choice(seo_angles)
+
+    return f"""You are an investigative financial journalist. Your job: write a deeply researched, genuinely interesting financial profile of {name} for a curious general audience.
+
+CORE MISSION: Make this article UNIQUE. Every politician profile on the web looks the same. Yours must not.
 
 CRITICAL RULES:
-- Article MUST be 900-1100 words in the "article" field
-- Use ONLY verified facts. Never invent numbers.
-- Write naturally — vary sentence length, use contractions occasionally
-- BANNED phrases: "it's worth noting", "delve into", "in conclusion", "moreover", "furthermore", "navigating", "landscape", "testament to", "shed light on", "plays a pivotal role"
-- Start with ONE surprising or counterintuitive financial fact — hook the reader immediately
-- Use specific numbers with source: "$4.2M (per OpenSecrets)" not "significant wealth"
-- Include at least one genuinely interesting personal financial detail most people don't know
+- Article MUST be 950-1150 words
+- Use ONLY verified, real facts. No invented numbers.
+- NEVER use these phrases: "it's worth noting", "delve into", "in conclusion", "moreover", "furthermore", "navigating", "landscape", "testament to", "shed light on", "pivotal role", "net worth journey", "financial journey", "over the years", "in the world of"
+- Vary sentence length dramatically — short punchy sentences mixed with longer analytical ones
+- Use specific sourced numbers: "$47,000 Senate salary" not "congressional salary"
+- Include at least 2 facts that most people genuinely don't know about this person's finances
+- Write conversationally — like a smart friend explaining this, not a Wikipedia article
+- Each H2 section should have a DIFFERENT energy: one analytical, one narrative, one surprising
 
-ARTICLE STRUCTURE:
-- Opening paragraph: Most surprising financial fact. No generic intros.
-- <h2>How {name} Makes Money</h2> — salary, speaking fees, books, businesses. Specific amounts.
-- <h2>Assets and Investments</h2> — real estate, stocks, businesses. Name actual holdings.
-- <h2>Net Worth Over the Years</h2> — track changes, explain jumps or drops
-- <h2>The Road to Wealth: Background and Career</h2> — career before politics, 1-2 lesser-known personal facts
+{structure}
 
-TONE: Write like explaining to a smart curious friend. Plain English. Make it interesting and human, not clinical.
+TONE GUIDE:
+- Opening: grab attention immediately, no "born in..." or "is a politician who..."
+- Middle sections: mix data with story — numbers need context to be interesting
+- Make comparisons: "more than most U.S. senators combined" or "less than you'd expect for a former president"
+- Be specific about locations: "a $2.1M condo in Georgetown" beats "Washington D.C. property"
 
-FIELDS:
-net_worth: integer dollars (e.g. 4200000). Must be from real sources.
-job_title: current/most recent real title
-history: "2022:INT,2023:INT,2024:INT,2025:INT,2026:INT" real data, not perfectly smooth
+FIELDS TO RETURN:
+net_worth: integer (e.g. 4200000) — use midpoint of disclosed range or best estimate with source
+job_title: current or most recent official title
+history: "2022:INT,2023:INT,2024:INT,2025:INT,2026:INT" — realistic, non-smooth progression
 wealth_sources: 1-2 from [{wealth_list}]
-assets: one specific sentence with real holdings
+assets: one vivid specific sentence naming actual holdings with values
 cats: from [{cats_list}] — always include "Most Searched Politicians"
-urls: 2-4 real URLs with actual financial data on this person
-seo_title: "{name} Net Worth 2026" (under 60 chars)
-seo_desc: 120-155 chars, unique, no exact net worth figure
-faq: exactly 3-4 questions:
-  Q1: current net worth with figure and source
-  Q2: how they made their money (specific)
-  Q3: something surprising (biggest asset, unusual investment)
-  Q4 optional: recent wealth change
+urls: 2-4 real working URLs (OpenSecrets, Ballotpedia, Quiver, Forbes, etc.)
+seo_title: "{name} Net Worth 2026" — max 60 chars
+seo_desc: 130-155 chars — use this angle: {seo_angle} — must be unique, compelling, no generic phrases
+faq: exactly 3-4 questions, each genuinely useful:
+  Q1: net worth figure with specific source cited
+  Q2: primary income sources (be specific)
+  Q3: most surprising or counterintuitive financial fact
+  Q4 (optional): biggest recent change in wealth
 
-Return ONLY valid JSON, no markdown:
-{{"article":"<p>Hook...</p><h2>How {name} Makes Money</h2><p>...</p><h2>Assets and Investments</h2><p>...</p><h2>Net Worth Over the Years</h2><p>...</p><h2>The Road to Wealth: Background and Career</h2><p>...</p>","net_worth":"INT","job_title":"TITLE","history":"2022:INT,2023:INT,2024:INT,2025:INT,2026:INT","wealth_sources":["S1"],"assets":"Specific sentence.","cats":["Most Searched Politicians","CATEGORY"],"urls":["URL1","URL2"],"seo_title":"{name} Net Worth 2026","seo_desc":"120-155 chars","faq":[{{"question":"How much is {name} worth in 2026?","answer":"Direct answer with figure."}},{{"question":"How did {name} make their money?","answer":"Specific sources."}},{{"question":"What is {name}'s biggest asset?","answer":"Specific asset."}}]}}"""
+Return ONLY valid JSON, no markdown, no extra text:
+{{"article":"<p>Hook paragraph...</p><h2>Section 1</h2><p>...</p><h2>Section 2</h2><p>...</p><h2>Section 3</h2><p>...</p><h2>Section 4</h2><p>...</p><h2>Section 5</h2><p>...</p>","net_worth":"INT","job_title":"TITLE","history":"2022:INT,2023:INT,2024:INT,2025:INT,2026:INT","wealth_sources":["S1"],"assets":"Specific vivid sentence.","cats":["Most Searched Politicians","CATEGORY"],"urls":["URL1","URL2"],"seo_title":"{name} Net Worth 2026","seo_desc":"Unique compelling description 130-155 chars","faq":[{{"question":"Q?","answer":"Specific answer with figure."}}]}}"""
 
 
 def post_to_wp(name, data, img_id, img_url_val):
