@@ -542,7 +542,7 @@ If you write even one character before the opening {{, the entire response will 
 {{"article":"<p>Hook paragraph...</p><h2>Section 1</h2><p>...</p><h2>Section 2</h2><p>...</p><h2>Section 3</h2><p>...</p><h2>Section 4</h2><p>...</p><h2>Section 5</h2><p>...</p>","net_worth":"INT","job_title":"TITLE","history":"2022:INT,2023:INT,2024:INT,2025:INT,2026:INT","wealth_sources":["S1"],"assets":"Specific vivid sentence.","cats":["Most Searched Politicians","CATEGORY"],"urls":["URL1","URL2"],"seo_title":"{name} Net Worth 2026","seo_desc":"Unique compelling description 130-155 chars","faq":[{{"question":"Q?","answer":"Specific answer with figure."}}]}}"""
 
 
-def post_to_wp(name, data, img_id, img_url_val):
+def post_to_wp(name, data, img_id, img_url_val, **kwargs):
     print("    [4/4] Keliame i WordPress...")
     cats          = resolve_categories(data.get("cats", []))
     net_worth     = clean_net_worth(data.get("net_worth", "0"))
@@ -596,15 +596,24 @@ def post_to_wp(name, data, img_id, img_url_val):
         }
     }
 
+    update_id = kwargs.get("update_id")
     for attempt in range(3):
         try:
-            r = requests.post(f"{WP_BASE_URL}/wp/v2/posts",
-                              json=payload, auth=(WP_USER, WP_PASS), timeout=WP_TIMEOUT)
-            if r.status_code in (201, 202):
-                print(f"    [4/4] OK! {r.json().get('link','')}")
-                with open("processed.txt","a") as pf: pf.write(name+"\n")
-                return True
-            elif r.status_code in (500,502,503,504):
+            if update_id:
+                r = requests.post(f"{WP_BASE_URL}/wp/v2/posts/{update_id}",
+                                  json=payload, auth=(WP_USER, WP_PASS), timeout=WP_TIMEOUT)
+                if r.status_code == 200:
+                    print(f"    [4/4] ATNAUJINTA! {r.json().get('link','')}")
+                    with open("processed.txt","a") as pf: pf.write(name+"\n")
+                    return True
+            else:
+                r = requests.post(f"{WP_BASE_URL}/wp/v2/posts",
+                                  json=payload, auth=(WP_USER, WP_PASS), timeout=WP_TIMEOUT)
+                if r.status_code in (201, 202):
+                    print(f"    [4/4] OK! {r.json().get('link','')}")
+                    with open("processed.txt","a") as pf: pf.write(name+"\n")
+                    return True
+            if r.status_code in (500,502,503,504):
                 time.sleep(10*(attempt+1))
             else:
                 print(f"    [4/4] Klaida {r.status_code}: {r.text[:300]}")
@@ -621,8 +630,26 @@ def run_bot(name, gemini_url):
     print(f"\n{'='*55}\n[{num}] {name}\n{'='*55}")
     exists, eid, estatus = check_post_exists(name)
     if exists:
-        print(f"  PRALEIDŽIAMA (ID:{eid}, {estatus})")
-        stats["skip"] += 1; return
+        # Tikriname ar ACF laukai užpildyti
+        needs_update = False
+        try:
+            pr = requests.get(f"{WP_BASE_URL}/wp/v2/posts/{eid}?acf_format=standard",
+                              auth=(WP_USER, WP_PASS), timeout=15)
+            if pr.status_code == 200:
+                acf = pr.json().get("acf", {})
+                nw = str(acf.get("net_worth","")).strip()
+                art = pr.json().get("content",{}).get("rendered","")
+                if not nw or nw == "0" or len(art) < 500:
+                    print(f"  ID:{eid} – laukai tušti arba trumpas straipsnis, ATNAUJINSIME")
+                    needs_update = True
+                else:
+                    print(f"  PRALEIDŽIAMA (ID:{eid}, {estatus}, NW:{nw})")
+                    stats["skip"] += 1; return
+        except:
+            print(f"  PRALEIDŽIAMA (ID:{eid}, {estatus})")
+            stats["skip"] += 1; return
+        if not needs_update:
+            stats["skip"] += 1; return
 
     img_id, img_url_val = None, ""
     wiki_img = get_wiki_image(name)
@@ -658,7 +685,7 @@ def run_bot(name, gemini_url):
         with open("failed.txt","a") as f: f.write(name+"\n")
         return
 
-    ok = post_to_wp(name, data, img_id, img_url_val)
+    ok = post_to_wp(name, data, img_id, img_url_val, update_id=eid if exists else None)
     if ok:
         stats["ok"] += 1; print(f"  SEKME: {name}")
     else:
