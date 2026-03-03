@@ -176,8 +176,67 @@ def fix_json_control_chars(text):
 
 
 def fix_html_quotes_in_json(text):
-    """Pakeičia <a href="url"> į <a href='url'> kad nelaužtų JSON string"""
-    return re.sub(r'(<[a-z][^>]*)"([^"<>]*)"([^>]*>)', r"\1'\2'\3", text)
+    """
+    Pakeičia HTML atributų double quotes į single quotes JSON stringo viduje.
+    Pvz: <a href="url"> -> <a href='url'>
+    Naudoja state machine kad teisingai atpažintų JSON string ribas.
+    """
+    result = []
+    i = 0
+    in_json_string = False
+    escape_next = False
+
+    while i < len(text):
+        ch = text[i]
+
+        if escape_next:
+            result.append(ch)
+            escape_next = False
+            i += 1
+            continue
+
+        if ch == '\\' and in_json_string:
+            result.append(ch)
+            escape_next = True
+            i += 1
+            continue
+
+        if ch == '"':
+            if not in_json_string:
+                in_json_string = True
+                result.append(ch)
+                i += 1
+                continue
+            else:
+                # Ar esame HTML tago viduje?
+                recent = "".join(result[-300:])
+                last_lt = recent.rfind("<")
+                last_gt = recent.rfind(">")
+                in_html_tag = last_lt > last_gt
+
+                if in_html_tag:
+                    # HTML atributo kabutė - pakeičiame į single quote
+                    result.append("'")
+                    i += 1
+                    # Einame iki kitos closing " ir ją irgi pakeičiame
+                    while i < len(text) and text[i] not in ('"', '>'):
+                        result.append(text[i])
+                        i += 1
+                    if i < len(text) and text[i] == '"':
+                        result.append("'")
+                        i += 1
+                    continue
+                else:
+                    # Tikra JSON stringo pabaiga
+                    in_json_string = False
+                    result.append(ch)
+                    i += 1
+                    continue
+
+        result.append(ch)
+        i += 1
+
+    return "".join(result)
 
 
 def extract_fields_by_regex(text):
@@ -251,12 +310,13 @@ def parse_json(text):
             print(f"    JSON iš dalies atkurtas ({best_fields} laukai)")
             return best
 
-    # 5. Regex extraction
+    # 5. Paskutinis bandymas - regex (tik jei turime svarbiausius laukus)
     print("    Bandome regex extraction...")
     result = extract_fields_by_regex(text)
-    if result:
-        print(f"    Regex OK: {len(result)} laukai")
-        return result
+    if result and result.get("article") and result.get("net_worth") and result.get("history"):
+        print(f"    Regex OK: {len(result)} laukai - bet kelsime iš naujo Gemini")
+        # Negrąžiname regex rezultato - verčiau bandome Gemini dar kartą
+        raise ValueError(f"JSON parse nepavyko (HTML quotes problema) - reikia retry")
 
     raise ValueError(f"Nepavyko parse JSON: {text[:300]}")
 
@@ -664,7 +724,8 @@ SEO DESC ANGLE: {seo_angle}
 2. End with }} — nothing after it
 3. No markdown, no ```json, no explanations
 4. net_worth must be a plain integer (no quotes, no $ sign)
-5. All 11 fields are REQUIRED — missing any field = failure"""
+5. All 11 fields are REQUIRED — missing any field = failure
+6. In the "article" HTML field: DO NOT use any HTML links or anchor tags at all. No <a href=...> tags. Plain HTML only: <p>, <h2>, <h3>, <strong>, <em>, <ul>, <li>. Links break the JSON parser."""
 
 
 # ─── WORDPRESS ───────────────────────────────────────────────────────────────
