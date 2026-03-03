@@ -11,7 +11,7 @@ WP_BASE_URL = "https://politiciannetworth.com/wp-json"
 AUTHOR_ID   = 3
 WP_TIMEOUT  = 30
 IMG_TIMEOUT = 20
-GEMINI_TIMEOUT = 120
+GEMINI_TIMEOUT = 180
 
 BIOGUIDE_MAP = {
     "Donald Trump": ("Donald J.", "Trump", ""),
@@ -123,7 +123,6 @@ def call_gemini(prompt, gemini_url, retries=4):
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": 0.25, "maxOutputTokens": 32768},
-        "tools": [{"google_search": {}}],
         "safetySettings": [{"category": c, "threshold": "BLOCK_NONE"} for c in
             ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH",
              "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]]
@@ -149,30 +148,60 @@ def call_gemini(prompt, gemini_url, retries=4):
 
 # ─── JSON PARSING ─────────────────────────────────────────────────────────────
 
+def fix_json_control_chars(text):
+    """Pakeičia realius control simbolius į escape sequences string reikšmėse"""
+    result = []
+    in_string = False
+    escape_next = False
+    for ch in text:
+        if escape_next:
+            result.append(ch)
+            escape_next = False
+        elif ch == '\\' and in_string:
+            result.append(ch)
+            escape_next = True
+        elif ch == '"':
+            result.append(ch)
+            in_string = not in_string
+        elif in_string and ch == '\n':
+            result.append('\\n')
+        elif in_string and ch == '\r':
+            result.append('\\r')
+        elif in_string and ch == '\t':
+            result.append('\\t')
+        else:
+            result.append(ch)
+    return "".join(result)
+
+
 def parse_json(text):
     text = text.strip()
 
+    # Pirma fiksuojame control chars
+    text_fixed = fix_json_control_chars(text)
+
     # 1. Tiesiogiai
-    try: return json.loads(text)
-    except: pass
+    for t in [text_fixed, text]:
+        try: return json.loads(t)
+        except: pass
 
     # 2. Markdown blokas
-    md = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.DOTALL)
+    md = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text_fixed, re.DOTALL)
     if md:
         try: return json.loads(md.group(1))
         except: pass
 
-    # 3. Nuo { iki paskutinio } — pagrindinis kelias
-    s = text.find("{")
-    e = text.rfind("}")
+    # 3. Nuo { iki paskutinio }
+    s = text_fixed.find("{")
+    e = text_fixed.rfind("}")
     if s != -1 and e != -1 and e > s:
-        try: return json.loads(text[s:e+1])
+        try: return json.loads(text_fixed[s:e+1])
         except: pass
 
     # 4. Nupjautas JSON — nuosekliai pašaliname paskutinį neužbaigtą lauką
     # Grąžiname GERIAUSIĄ rezultatą (su daugiausiai laukų)
     if s != -1:
-        chunk = text[s:]
+        chunk = text_fixed[s:]
         best = None
         best_fields = 0
         for _ in range(30):
@@ -187,7 +216,7 @@ def parse_json(text):
                     if nfields > best_fields:
                         best = parsed
                         best_fields = nfields
-                    if nfields >= 10:  # Turime visus laukus - grąžiname iš karto
+                    if nfields >= 10:
                         print(f"    JSON atkurtas ({nfields} laukai)")
                         return parsed
                 except: pass
@@ -206,9 +235,10 @@ def extract_text_from_gemini(res):
     try:
         cand = res["candidates"][0]
         reason = cand.get("finishReason", "UNKNOWN")
-        # Surenkame tekstą iš visų parts
+        # Surenkame tekstą iš visų parts (google_search gali pridėti papildomų parts)
         parts = cand.get("content", {}).get("parts", [])
-        text = "".join(p.get("text", "") for p in parts).strip()
+        # Imame tik text parts, ignoruojame tool_use/tool_result
+        text = "".join(p.get("text", "") for p in parts if "text" in p).strip()
         print(f"    {len(text)} simboliu, reason: {reason}")
         if reason == "MAX_TOKENS":
             return None, "MAX_TOKENS"
