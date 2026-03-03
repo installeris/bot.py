@@ -281,7 +281,8 @@ def check_post_exists(name):
 
 def make_slug(name):
     s = re.sub(r"[^a-z0-9\s-]", "", name.lower().strip())
-    return f"{re.sub(r'\\s+', '-', s)}-net-worth"
+    s = re.sub(r"\s+", "-", s)
+    return f"{s}-net-worth"
 
 def format_sources(urls, name=""):
     final = []
