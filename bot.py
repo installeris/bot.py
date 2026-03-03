@@ -212,7 +212,7 @@ def call_gemini(prompt, gemini_url, retries=4):
     delay = 15
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 16384},
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 32768},
         "tools": [{"google_search": {}}],
         "safetySettings": [{"category": c, "threshold": "BLOCK_NONE"} for c in
             ["HARM_CATEGORY_HARASSMENT","HARM_CATEGORY_HATE_SPEECH",
@@ -238,17 +238,50 @@ def call_gemini(prompt, gemini_url, retries=4):
 
 
 def parse_json(text):
+    # 1. Tiesiogiai
     for t in [text, text.strip()]:
         try: return json.loads(t)
         except: pass
+    # 2. Iš markdown bloko
     md = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
     if md:
         try: return json.loads(md.group(1))
         except: pass
+    # 3. Nuo { iki paskutinio }
     s, e = text.find('{'), text.rfind('}')
     if s != -1 and e != -1:
         try: return json.loads(text[s:e+1])
         except: pass
+    # 4. Jei JSON nupjautas - bandome uzdaryti
+    if s != -1:
+        chunk = text[s:]
+        # Pridedame trescius kabliatasskius prie neuzbaigtu lauku
+        chunk = re.sub(r',\s*"[^"]+": "[^"]*$', '', chunk)  # nupjauta reiksme
+        chunk = re.sub(r',\s*"[^"]+": \[$', '', chunk)     # nupjautas masyvas
+        # Bandome uzdaryti JSON
+        for closing in ['"}', '"}}', '"]}', '"]}}}']:
+            try: return json.loads(chunk + closing)
+            except: pass
+        # Paskutinis bandymas - ieskome article lauko ir konstruojame minimal JSON
+        article_m = re.search(r'"article":\s*"(.*?)"(?=,\s*"net_worth")', chunk, re.DOTALL)
+        nw_m = re.search(r'"net_worth":\s*"?(\d+)"?', chunk)
+        job_m = re.search(r'"job_title":\s*"([^"]*)"', chunk)
+        if article_m and nw_m:
+            minimal = {
+                "article": article_m.group(1).replace('\\"', '"'),
+                "net_worth": nw_m.group(1),
+                "job_title": job_m.group(1) if job_m else "Politician",
+                "history": "2022:0,2023:0,2024:0,2025:0,2026:0",
+                "wealth_sources": [],
+                "assets": "",
+                "cats": ["Most Searched Politicians"],
+                "urls": [],
+                "seo_title": "",
+                "seo_desc": "",
+                "faq": []
+            }
+            print("    PERSPEJIMAS: JSON buvo nupjautas - naudojame minimal versija")
+            return minimal
     raise ValueError(f"JSON klaida: {text[:300]}")
 
 
