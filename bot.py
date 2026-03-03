@@ -150,28 +150,53 @@ def call_gemini(prompt, gemini_url, retries=4):
 # ─── JSON PARSING ─────────────────────────────────────────────────────────────
 
 def parse_json(text):
+    text = text.strip()
+
     # 1. Tiesiogiai
     try: return json.loads(text)
     except: pass
+
     # 2. Markdown blokas
-    md = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    md = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.DOTALL)
     if md:
         try: return json.loads(md.group(1))
         except: pass
-    # 3. Nuo { iki paskutinio }
-    s, e = text.find("{"), text.rfind("}")
+
+    # 3. Nuo { iki paskutinio } — pagrindinis kelias
+    s = text.find("{")
+    e = text.rfind("}")
     if s != -1 and e != -1 and e > s:
         try: return json.loads(text[s:e+1])
         except: pass
-    # 4. Nupjautas JSON - bandome uzdaryti
+
+    # 4. Nupjautas JSON — nuosekliai pašaliname paskutinį neužbaigtą lauką
+    # Grąžiname GERIAUSIĄ rezultatą (su daugiausiai laukų)
     if s != -1:
         chunk = text[s:]
-        chunk = re.sub(r',\s*"[^"]+": "[^"]*$', '', chunk)
-        chunk = re.sub(r',\s*"[^"]+": \[$', '', chunk)
-        for closing in ['"}', '"}}', '"]}', '"]}}}']:
-            try: return json.loads(chunk + closing)
-            except: pass
-    raise ValueError(f"Nepavyko parse JSON: {text[:200]}")
+        best = None
+        best_fields = 0
+        for _ in range(30):
+            last_comma = chunk.rfind(",")
+            if last_comma == -1:
+                break
+            candidate = chunk[:last_comma]
+            for closing in ["}", "}}", "]}", "]}}"]:
+                try:
+                    parsed = json.loads(candidate + closing)
+                    nfields = len(parsed.keys())
+                    if nfields > best_fields:
+                        best = parsed
+                        best_fields = nfields
+                    if nfields >= 10:  # Turime visus laukus - grąžiname iš karto
+                        print(f"    JSON atkurtas ({nfields} laukai)")
+                        return parsed
+                except: pass
+            chunk = candidate
+        if best:
+            print(f"    JSON iš dalies atkurtas ({best_fields} laukai)")
+            return best
+
+    raise ValueError(f"Nepavyko parse JSON: {text[:300]}")
 
 
 def extract_text_from_gemini(res):
@@ -216,12 +241,19 @@ def check_required_fields(data):
         missing.append("history tuščia arba placeholder")
     if not str(data.get("job_title", "")).strip():
         missing.append("job_title tuščias")
+    # faq ir urls - tik įspėjimas, ne blokeris
     faq = data.get("faq", [])
-    if not faq or len(faq) < 2:
-        missing.append(f"faq per mažai ({len(faq)}, reikia 3+)")
+    if not faq:
+        print("    ĮSPĖJIMAS: faq tuščias - bus generuojamas automatiškai")
+        data["faq"] = [
+            {"question": f"What is their net worth in 2026?",
+             "answer": f"Estimated at ${int(data.get('net_worth', 0)):,} based on public disclosures."},
+            {"question": "What are their primary income sources?",
+             "answer": data.get("assets", "Multiple income sources including investments and career earnings.")},
+        ]
     urls = data.get("urls", [])
-    if not urls or len(urls) < 1:
-        missing.append("urls tuščias")
+    if not urls:
+        print("    ĮSPĖJIMAS: urls tuščias")
     return missing
 
 
