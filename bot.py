@@ -530,7 +530,15 @@ faq: exactly 3-4 questions, each genuinely useful:
   Q3: most surprising or counterintuitive financial fact
   Q4 (optional): biggest recent change in wealth
 
-Return ONLY valid JSON, no markdown, no extra text:
+⚠️ CRITICAL OUTPUT RULE ⚠️
+Your response MUST start with {{ and end with }}
+Do NOT write any text before or after the JSON object.
+Do NOT use markdown code blocks (no ```json).
+Do NOT explain, introduce, or comment on your response.
+ONLY output the raw JSON object itself.
+
+If you write even one character before the opening {{, the entire response will be discarded and the task will fail.
+
 {{"article":"<p>Hook paragraph...</p><h2>Section 1</h2><p>...</p><h2>Section 2</h2><p>...</p><h2>Section 3</h2><p>...</p><h2>Section 4</h2><p>...</p><h2>Section 5</h2><p>...</p>","net_worth":"INT","job_title":"TITLE","history":"2022:INT,2023:INT,2024:INT,2025:INT,2026:INT","wealth_sources":["S1"],"assets":"Specific vivid sentence.","cats":["Most Searched Politicians","CATEGORY"],"urls":["URL1","URL2"],"seo_title":"{name} Net Worth 2026","seo_desc":"Unique compelling description 130-155 chars","faq":[{{"question":"Q?","answer":"Specific answer with figure."}}]}}"""
 
 
@@ -628,13 +636,21 @@ def run_bot(name, gemini_url):
     try:
         cand = res["candidates"][0]
         reason = cand.get("finishReason","UNKNOWN")
-        text = cand["content"]["parts"][0]["text"]
+        text = cand["content"]["parts"][0]["text"].strip()
         print(f"    {len(text)} simboliu, reason: {reason}")
         if reason == "MAX_TOKENS":
             print("    Nupjautas!")
             stats["fail"] += 1
             with open("failed.txt","a") as f: f.write(name+"\n")
             return
+        # Jei Gemini pridėjo įvadinį tekstą prieš JSON - praleidžiame
+        if not text.startswith("{"):
+            brace = text.find("{")
+            if brace != -1:
+                print(f"    Įvadinis tekstas ({brace} chars) - ieškome JSON...")
+                text = text[brace:]
+            else:
+                raise ValueError(f"Nėra JSON objecto atsakyme: {text[:200]}")
         data = parse_json(text)
     except Exception as e:
         print(f"  JSON klaida: {e}")
