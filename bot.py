@@ -176,67 +176,13 @@ def fix_json_control_chars(text):
 
 
 def fix_html_quotes_in_json(text):
-    """
-    Pakeičia HTML atributų double quotes į single quotes JSON stringo viduje.
-    Pvz: <a href="url"> -> <a href='url'>
-    Naudoja state machine kad teisingai atpažintų JSON string ribas.
-    """
-    result = []
-    i = 0
-    in_json_string = False
-    escape_next = False
-
-    while i < len(text):
-        ch = text[i]
-
-        if escape_next:
-            result.append(ch)
-            escape_next = False
-            i += 1
-            continue
-
-        if ch == '\\' and in_json_string:
-            result.append(ch)
-            escape_next = True
-            i += 1
-            continue
-
-        if ch == '"':
-            if not in_json_string:
-                in_json_string = True
-                result.append(ch)
-                i += 1
-                continue
-            else:
-                # Ar esame HTML tago viduje?
-                recent = "".join(result[-300:])
-                last_lt = recent.rfind("<")
-                last_gt = recent.rfind(">")
-                in_html_tag = last_lt > last_gt
-
-                if in_html_tag:
-                    # HTML atributo kabutė - pakeičiame į single quote
-                    result.append("'")
-                    i += 1
-                    # Einame iki kitos closing " ir ją irgi pakeičiame
-                    while i < len(text) and text[i] not in ('"', '>'):
-                        result.append(text[i])
-                        i += 1
-                    if i < len(text) and text[i] == '"':
-                        result.append("'")
-                        i += 1
-                    continue
-                else:
-                    # Tikra JSON stringo pabaiga
-                    in_json_string = False
-                    result.append(ch)
-                    i += 1
-                    continue
-
-        result.append(ch)
-        i += 1
-
-    return "".join(result)
+    """Pakeičia HTML atributų double quotes į single quotes."""
+    text = re.sub(r'href="([^"]*)"', r"href='\1'", text)
+    text = re.sub(r'src="([^"]*)"', r"src='\1'", text)
+    text = re.sub(r'action="([^"]*)"', r"action='\1'", text)
+    text = re.sub(r'class="([^"]*)"', r"class='\1'", text)
+    text = re.sub(r'id="([^"]*)"', r"id='\1'", text)
+    return text
 
 
 def extract_fields_by_regex(text):
@@ -310,13 +256,12 @@ def parse_json(text):
             print(f"    JSON iš dalies atkurtas ({best_fields} laukai)")
             return best
 
-    # 5. Paskutinis bandymas - regex (tik jei turime svarbiausius laukus)
+    # 5. Paskutinis bandymas - regex extraction
     print("    Bandome regex extraction...")
     result = extract_fields_by_regex(text)
-    if result and result.get("article") and result.get("net_worth") and result.get("history"):
-        print(f"    Regex OK: {len(result)} laukai - bet kelsime iš naujo Gemini")
-        # Negrąžiname regex rezultato - verčiau bandome Gemini dar kartą
-        raise ValueError(f"JSON parse nepavyko (HTML quotes problema) - reikia retry")
+    if result:
+        print(f"    Regex OK: {len(result)} laukai")
+        return result
 
     raise ValueError(f"Nepavyko parse JSON: {text[:300]}")
 
