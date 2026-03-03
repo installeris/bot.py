@@ -175,56 +175,88 @@ def fix_json_control_chars(text):
     return "".join(result)
 
 
+def fix_html_quotes_in_json(text):
+    """Pakeičia <a href="url"> į <a href='url'> kad nelaužtų JSON string"""
+    return re.sub(r'(<[a-z][^>]*)"([^"<>]*)"([^>]*>)', r"\1'\2'\3", text)
+
+
+def extract_fields_by_regex(text):
+    """Paskutinis fallback - ištraukia laukus regex kai JSON neparse"""
+    data = {}
+    art = re.search(r'"article"\s*:\s*"(.*?)(?=",\s*"(?:net_worth|job_title))', text, re.DOTALL)
+    if art: data["article"] = art.group(1).replace('\\"', '"')
+    nw = re.search(r'"net_worth"\s*:\s*"?(\d+)"?', text)
+    if nw: data["net_worth"] = int(nw.group(1))
+    jt = re.search(r'"job_title"\s*:\s*"([^"]{1,150})"', text)
+    if jt: data["job_title"] = jt.group(1)
+    hist = re.search(r'"history"\s*:\s*"([0-9:,]+)"', text)
+    if hist: data["history"] = hist.group(1)
+    seo_t = re.search(r'"seo_title"\s*:\s*"([^"]{1,80})"', text)
+    if seo_t: data["seo_title"] = seo_t.group(1)
+    seo_d = re.search(r'"seo_desc"\s*:\s*"([^"]{20,200})"', text)
+    if seo_d: data["seo_desc"] = seo_d.group(1)
+    assets = re.search(r'"assets"\s*:\s*"([^"]{5,300})"', text)
+    if assets: data["assets"] = assets.group(1)
+    cats_m = re.search(r'"cats"\s*:\s*\[([^\]]+)\]', text)
+    if cats_m: data["cats"] = re.findall(r'"([^"]+)"', cats_m.group(1))
+    ws_m = re.search(r'"wealth_sources"\s*:\s*\[([^\]]+)\]', text)
+    if ws_m: data["wealth_sources"] = re.findall(r'"([^"]+)"', ws_m.group(1))
+    urls_m = re.search(r'"urls"\s*:\s*\[([^\]]*)\]', text, re.DOTALL)
+    if urls_m: data["urls"] = re.findall(r'"(https?://[^"]+)"', urls_m.group(1))
+    return data if len(data) >= 4 else None
+
+
 def parse_json(text):
     text = text.strip()
 
-    # Pirma fiksuojame control chars
+    # 1. Fix control chars + tiesiogiai
     text_fixed = fix_json_control_chars(text)
-
-    # 1. Tiesiogiai
     for t in [text_fixed, text]:
         try: return json.loads(t)
         except: pass
 
-    # 2. Markdown blokas
-    md = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text_fixed, re.DOTALL)
-    if md:
-        try: return json.loads(md.group(1))
-        except: pass
+    # 2. Fix HTML href quotes ("url" -> 'url') ir bandome vėl
+    text_html = fix_html_quotes_in_json(text_fixed)
+    try: return json.loads(text_html)
+    except: pass
 
     # 3. Nuo { iki paskutinio }
-    s = text_fixed.find("{")
-    e = text_fixed.rfind("}")
+    s = text_html.find("{")
+    e = text_html.rfind("}")
     if s != -1 and e != -1 and e > s:
-        try: return json.loads(text_fixed[s:e+1])
+        try: return json.loads(text_html[s:e+1])
         except: pass
 
-    # 4. Nupjautas JSON — nuosekliai pašaliname paskutinį neužbaigtą lauką
-    # Grąžiname GERIAUSIĄ rezultatą (su daugiausiai laukų)
+    # 4. Nupjautas JSON - karpome nuo galo, grąžiname geriausią
     if s != -1:
-        chunk = text_fixed[s:]
+        chunk = text_html[s:]
         best = None
         best_fields = 0
         for _ in range(30):
             last_comma = chunk.rfind(",")
-            if last_comma == -1:
-                break
+            if last_comma == -1: break
             candidate = chunk[:last_comma]
             for closing in ["}", "}}", "]}", "]}}"]:
                 try:
                     parsed = json.loads(candidate + closing)
-                    nfields = len(parsed.keys())
-                    if nfields > best_fields:
-                        best = parsed
-                        best_fields = nfields
-                    if nfields >= 10:
-                        print(f"    JSON atkurtas ({nfields} laukai)")
+                    nf = len(parsed.keys())
+                    if nf > best_fields:
+                        best = parsed; best_fields = nf
+                    if nf >= 10:
+                        print(f"    JSON atkurtas ({nf} laukai)")
                         return parsed
                 except: pass
             chunk = candidate
         if best:
             print(f"    JSON iš dalies atkurtas ({best_fields} laukai)")
             return best
+
+    # 5. Regex extraction
+    print("    Bandome regex extraction...")
+    result = extract_fields_by_regex(text)
+    if result:
+        print(f"    Regex OK: {len(result)} laukai")
+        return result
 
     raise ValueError(f"Nepavyko parse JSON: {text[:300]}")
 
