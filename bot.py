@@ -186,28 +186,32 @@ def fix_html_quotes_in_json(text):
 
 
 def extract_fields_by_regex(text):
-    """Paskutinis fallback - ištraukia laukus regex kai JSON neparse"""
+    """Fallback - ištraukia laukus regex kai JSON neparse"""
     data = {}
-    art = re.search(r'"article"\s*:\s*"(.*?)(?=",\s*"(?:net_worth|job_title))', text, re.DOTALL)
+    art = re.search(r'"article"\s*:\s*"(.*?)(?=",\s*"net_worth")', text, re.DOTALL)
     if art: data["article"] = art.group(1).replace('\\"', '"')
-    nw = re.search(r'"net_worth"\s*:\s*"?(\d+)"?', text)
+    # net_worth: tik tikras laukas - po "net_worth": seka skaičius (ne stringo viduje)
+    nw = re.search(r'"net_worth"\s*:\s*(\d{5,})', text)
     if nw: data["net_worth"] = int(nw.group(1))
-    jt = re.search(r'"job_title"\s*:\s*"([^"]{1,150})"', text)
+    jt = re.search(r'"job_title"\s*:\s*"([^"]{2,150})"', text)
     if jt: data["job_title"] = jt.group(1)
-    hist = re.search(r'"history"\s*:\s*"([0-9:,]+)"', text)
+    hist = re.search(r'"history"\s*:\s*"(\d{4}:\d+(?:,\d{4}:\d+)+)"', text)
     if hist: data["history"] = hist.group(1)
-    seo_t = re.search(r'"seo_title"\s*:\s*"([^"]{1,80})"', text)
+    seo_t = re.search(r'"seo_title"\s*:\s*"([^"]{5,80})"', text)
     if seo_t: data["seo_title"] = seo_t.group(1)
     seo_d = re.search(r'"seo_desc"\s*:\s*"([^"]{20,200})"', text)
     if seo_d: data["seo_desc"] = seo_d.group(1)
-    assets = re.search(r'"assets"\s*:\s*"([^"]{5,300})"', text)
+    assets = re.search(r'"assets"\s*:\s*"([^"]{5,500})"', text)
     if assets: data["assets"] = assets.group(1)
     cats_m = re.search(r'"cats"\s*:\s*\[([^\]]+)\]', text)
     if cats_m: data["cats"] = re.findall(r'"([^"]+)"', cats_m.group(1))
     ws_m = re.search(r'"wealth_sources"\s*:\s*\[([^\]]+)\]', text)
     if ws_m: data["wealth_sources"] = re.findall(r'"([^"]+)"', ws_m.group(1))
-    urls_m = re.search(r'"urls"\s*:\s*\[([^\]]*)\]', text, re.DOTALL)
+    urls_m = re.search(r'"urls"\s*:\s*\[([^\]]*?)\]', text, re.DOTALL)
     if urls_m: data["urls"] = re.findall(r'"(https?://[^"]+)"', urls_m.group(1))
+    faq_items = re.findall(r'\{"question"\s*:\s*"([^"]+)"\s*,\s*"answer"\s*:\s*"([^"]+)"\}', text)
+    if faq_items: data["faq"] = [{"question": q, "answer": a} for q, a in faq_items]
+    if data.get("net_worth"): print(f"    Regex net_worth: {data['net_worth']:,}")
     return data if len(data) >= 4 else None
 
 
@@ -685,17 +689,16 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
     history       = clean_history(data.get("history", ""))
     job_title     = data.get("job_title", "").strip()
 
-    # Sinchronizuojame: paskutinė history reikšmė = net_worth
-    # net_worth yra tikslesnis (Gemini specialiai jį nustatė), history 2026 turi sutapti
+    # net_worth laukas yra TIESA - history 2026 turi sutapti su juo
+    # (regex fallback kartais paima history reikšmę kaip net_worth - todėl visada sinchronizuojame)
     if history and net_worth_int > 0:
         h_parts = history.split(",")
         last_year = h_parts[-1].split(":")[0] if ":" in h_parts[-1] else "2026"
         last_val = int(h_parts[-1].split(":")[1]) if ":" in h_parts[-1] else 0
-        # Jei skirtumas > 20% - net_worth laimi
-        if last_val == 0 or abs(last_val - net_worth_int) / net_worth_int > 0.20:
+        if last_val != net_worth_int:
             h_parts[-1] = f"{last_year}:{net_worth_int}"
             history = ",".join(h_parts)
-            print(f"    History 2026 sinchronizuota: {last_val} → {net_worth_int}")
+            print(f"    History sync: {last_val:,} → {net_worth_int:,}")
 
     print(f"    NW: {net_worth} | history: {history.count(',') + 1 if history else 0} entries | cats: {cats}")
 
