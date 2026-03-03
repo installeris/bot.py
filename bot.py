@@ -421,10 +421,26 @@ def resolve_categories(cat_names):
     return list(cat_ids)
 
 
+BLOCKED_URL_PATTERNS = [
+    "vertexaisearch.cloud.google.com", "googleapis.com", "google.com/search",
+    "gstatic.com", "googleusercontent.com", "youtube.com/watch",
+    "twitter.com", "x.com/", "facebook.com", "instagram.com", "tiktok.com",
+]
+
+def is_valid_source_url(url):
+    url = url.strip()
+    if not url or not url.startswith("http"):
+        return False
+    for blocked in BLOCKED_URL_PATTERNS:
+        if blocked in url:
+            return False
+    return True
+
 def format_sources(urls, name=""):
     final = []
     quiver_added = False
     for url in urls:
+        url = url.strip()
         if "quiverquant.com" in url:
             if not quiver_added and name in BIOGUIDE_MAP:
                 fn, ln, bio = BIOGUIDE_MAP[name]
@@ -433,7 +449,8 @@ def format_sources(urls, name=""):
                     final.append(f"https://www.quiverquant.com/congresstrading/politician/{ne}-{bio}")
                     quiver_added = True
             continue
-        if url.strip(): final.append(url.strip())
+        if is_valid_source_url(url):
+            final.append(url)
     if not quiver_added and name in BIOGUIDE_MAP:
         fn, ln, bio = BIOGUIDE_MAP[name]
         if bio:
@@ -481,12 +498,18 @@ def build_references_html(urls):
         "forbes.com": "Forbes – Wealth Estimate",
         "reuters.com": "Reuters", "apnews.com": "AP News",
         "celebrity": "Celebrity Net Worth",
+        "cnbc.com": "CNBC", "businessinsider.com": "Business Insider",
+        "thestreet.com": "The Street", "washingtonpost.com": "Washington Post",
     }
     items = []
     for url in urls:
+        if not is_valid_source_url(url):
+            continue
         domain = re.sub(r"https?://(www\.)?", "", url).split("/")[0]
         label = next((v for k, v in label_map.items() if k in domain), domain)
         items.append(f'<li><a href="{url}" target="_blank" rel="nofollow noopener">{label}</a></li>')
+    if not items:
+        return ""
     return f"""
 <hr style="margin:40px 0 20px">
 <div class="references-section">
@@ -617,13 +640,21 @@ SEO DESC ANGLE: {seo_angle}
 def post_to_wp(name, data, img_id, img_url_val, post_id=None):
     print("    [4/4] Keliame i WordPress...")
 
-    cats      = resolve_categories(data.get("cats", []))
-    nw_raw    = data.get("net_worth", 0)
-    net_worth = clean_net_worth(nw_raw)
-    history   = clean_history(data.get("history", ""))
-    job_title = data.get("job_title", "").strip()
+    cats          = resolve_categories(data.get("cats", []))
+    nw_raw        = data.get("net_worth", 0)
+    net_worth     = clean_net_worth(nw_raw)
+    net_worth_int = int(net_worth) if net_worth.isdigit() else 0
+    history       = clean_history(data.get("history", ""))
+    job_title     = data.get("job_title", "").strip()
 
-    print(f"    NW: {net_worth} | history entries: {history.count(',') + 1 if history else 0} | cats: {cats}")
+    # Sinchronizuojame: paskutinė history reikšmė = net_worth
+    if history and net_worth_int > 0:
+        h_parts = history.split(",")
+        last_year = h_parts[-1].split(":")[0] if ":" in h_parts[-1] else "2026"
+        h_parts[-1] = f"{last_year}:{net_worth_int}"
+        history = ",".join(h_parts)
+
+    print(f"    NW: {net_worth} | history: {history.count(',') + 1 if history else 0} entries | cats: {cats}")
 
     seo_desc = data.get("seo_desc", "").strip()
     if len(seo_desc) < 50:
