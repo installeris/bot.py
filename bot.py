@@ -230,30 +230,43 @@ def parse_json(text):
 
 
 def extract_text_from_gemini(res):
-    """Ištraukia tekstą iš Gemini atsakymo, grąžina (text, error)"""
+    """Ištraukia JSON tekstą iš Gemini atsakymo, grąžina (text, error)"""
     if not res or "candidates" not in res:
         return None, "no candidates"
     try:
         cand = res["candidates"][0]
         reason = cand.get("finishReason", "UNKNOWN")
-        # Surenkame tekstą iš visų parts (google_search gali pridėti papildomų parts)
         parts = cand.get("content", {}).get("parts", [])
-        # Imame tik text parts, ignoruojame tool_use/tool_result
-        text = "".join(p.get("text", "") for p in parts if "text" in p).strip()
-        print(f"    {len(text)} simboliu, reason: {reason}")
+
+        # Imame tik text parts
+        text_parts = [p.get("text", "").strip() for p in parts if "text" in p and p.get("text", "").strip()]
+        full_text = "".join(text_parts)
+        print(f"    {len(full_text)} simboliu, reason: {reason}, parts: {len(text_parts)}")
+
         if reason == "MAX_TOKENS":
             return None, "MAX_TOKENS"
-        if not text:
+        if not full_text:
             return None, "tuscias atsakymas"
-        # Jei Gemini pridėjo tekstą prieš JSON
-        if not text.startswith("{"):
-            brace = text.find("{")
+
+        # Su google_search Gemini gali grąžinti: [search_results_text, json_text]
+        # Ieškome paskutinio part kuris prasideda { - tai bus JSON
+        json_text = None
+        for part in reversed(text_parts):
+            if part.startswith("{"):
+                json_text = part
+                print(f"    Rastas JSON part ({len(json_text)} chars)")
+                break
+
+        # Jei nerado grynojo JSON part - ieškome { visame tekste
+        if not json_text:
+            brace = full_text.find("{")
             if brace != -1:
-                print(f"    Randame JSON pozicijoje {brace}...")
-                text = text[brace:]
+                json_text = full_text[brace:]
+                print(f"    JSON rasta pozicijoje {brace}")
             else:
-                return None, f"nera JSON: {text[:150]}"
-        return text, None
+                return None, f"nera JSON: {full_text[:150]}"
+
+        return json_text, None
     except Exception as e:
         return None, str(e)
 
