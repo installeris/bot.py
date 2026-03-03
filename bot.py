@@ -646,7 +646,7 @@ RETURN THIS EXACT JSON STRUCTURE — every field required:
   "net_worth": 4200000,
   "job_title": "Current or most recent official title",
   "history": "2022:3000000,2023:3500000,2024:3800000,2025:4000000,2026:4200000",
-  "wealth_sources": ["Real Estate Holdings", "Book Deals & Royalties"],
+  "wealth_sources": ["Real Estate Holdings", "Book Deals & Royalties", "Stock Market Investments"],
   "assets": "One vivid specific sentence naming actual holdings with values",
   "cats": ["Most Searched Politicians", "one category from list"],
   "urls": ["https://...", "https://...", "https://..."],
@@ -661,7 +661,7 @@ RETURN THIS EXACT JSON STRUCTURE — every field required:
 }}
 
 CATEGORIES to choose from: {cats_list}
-WEALTH SOURCES to choose from: {wealth_list}
+WEALTH SOURCES — pick 2-4 that genuinely apply to this person: {wealth_list}
 SEO DESC ANGLE: {seo_angle}
 
 ⚠️ OUTPUT RULES — CRITICAL:
@@ -686,11 +686,16 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
     job_title     = data.get("job_title", "").strip()
 
     # Sinchronizuojame: paskutinė history reikšmė = net_worth
+    # net_worth yra tikslesnis (Gemini specialiai jį nustatė), history 2026 turi sutapti
     if history and net_worth_int > 0:
         h_parts = history.split(",")
         last_year = h_parts[-1].split(":")[0] if ":" in h_parts[-1] else "2026"
-        h_parts[-1] = f"{last_year}:{net_worth_int}"
-        history = ",".join(h_parts)
+        last_val = int(h_parts[-1].split(":")[1]) if ":" in h_parts[-1] else 0
+        # Jei skirtumas > 20% - net_worth laimi
+        if last_val == 0 or abs(last_val - net_worth_int) / net_worth_int > 0.20:
+            h_parts[-1] = f"{last_year}:{net_worth_int}"
+            history = ",".join(h_parts)
+            print(f"    History 2026 sinchronizuota: {last_val} → {net_worth_int}")
 
     print(f"    NW: {net_worth} | history: {history.count(',') + 1 if history else 0} entries | cats: {cats}")
 
@@ -724,7 +729,7 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
             "job_title":         job_title,
             "net_worth":         net_worth,
             "net_worth_history": history,
-            "source_of_wealth":  [s for s in data.get("wealth_sources", []) if s in WEALTH_OPTIONS][:2],
+            "source_of_wealth":  [s for s in data.get("wealth_sources", []) if s in WEALTH_OPTIONS][:4],
             "main_assets":       data.get("assets", "").strip(),
             "sources":           format_sources(urls, name),
             "photo_url":         img_url_val or "",
