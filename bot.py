@@ -176,47 +176,103 @@ def fix_json_control_chars(text):
 
 
 def fix_html_quotes_in_json(text):
-    """Pakeičia HTML atributų double quotes į single quotes."""
-    text = re.sub(r'href="([^"]*)"', r"href='\1'", text)
-    text = re.sub(r'src="([^"]*)"', r"src='\1'", text)
-    text = re.sub(r'action="([^"]*)"', r"action='\1'", text)
-    text = re.sub(r'class="([^"]*)"', r"class='\1'", text)
-    text = re.sub(r'id="([^"]*)"', r"id='\1'", text)
-    return text
+    """
+    Pakeičia HTML atributų double quotes į single quotes JSON stringo viduje.
+    Pvz: <a href="url"> -> <a href='url'>
+    Naudoja state machine kad teisingai atpažintų JSON string ribas.
+    """
+    result = []
+    i = 0
+    in_json_string = False
+    escape_next = False
+
+    while i < len(text):
+        ch = text[i]
+
+        if escape_next:
+            result.append(ch)
+            escape_next = False
+            i += 1
+            continue
+
+        if ch == '\\' and in_json_string:
+            result.append(ch)
+            escape_next = True
+            i += 1
+            continue
+
+        if ch == '"':
+            if not in_json_string:
+                in_json_string = True
+                result.append(ch)
+                i += 1
+                continue
+            else:
+                # Ar esame HTML tago viduje?
+                recent = "".join(result[-300:])
+                last_lt = recent.rfind("<")
+                last_gt = recent.rfind(">")
+                in_html_tag = last_lt > last_gt
+
+                if in_html_tag:
+                    # HTML atributo kabutė - pakeičiame į single quote
+                    result.append("'")
+                    i += 1
+                    # Einame iki kitos closing " ir ją irgi pakeičiame
+                    while i < len(text) and text[i] not in ('"', '>'):
+                        result.append(text[i])
+                        i += 1
+                    if i < len(text) and text[i] == '"':
+                        result.append("'")
+                        i += 1
+                    continue
+                else:
+                    # Tikra JSON stringo pabaiga
+                    in_json_string = False
+                    result.append(ch)
+                    i += 1
+                    continue
+
+        result.append(ch)
+        i += 1
+
+    return "".join(result)
 
 
 def extract_fields_by_regex(text):
-    """Fallback - ištraukia laukus regex kai JSON neparse"""
+    """Paskutinis fallback - ištraukia laukus regex kai JSON neparse"""
     data = {}
-    art = re.search(r'"article"\s*:\s*"(.*?)(?=",\s*"net_worth")', text, re.DOTALL)
+    art = re.search(r'"article"\s*:\s*"(.*?)(?=",\s*"(?:net_worth|job_title))', text, re.DOTALL)
     if art: data["article"] = art.group(1).replace('\\"', '"')
-    # net_worth: tik tikras laukas - po "net_worth": seka skaičius (ne stringo viduje)
-    nw = re.search(r'"net_worth"\s*:\s*(\d{5,})', text)
+    nw = re.search(r'"net_worth"\s*:\s*"?(\d+)"?', text)
     if nw: data["net_worth"] = int(nw.group(1))
-    jt = re.search(r'"job_title"\s*:\s*"([^"]{2,150})"', text)
+    jt = re.search(r'"job_title"\s*:\s*"([^"]{1,150})"', text)
     if jt: data["job_title"] = jt.group(1)
-    hist = re.search(r'"history"\s*:\s*"(\d{4}:\d+(?:,\d{4}:\d+)+)"', text)
+    hist = re.search(r'"history"\s*:\s*"([0-9:,]+)"', text)
     if hist: data["history"] = hist.group(1)
-    seo_t = re.search(r'"seo_title"\s*:\s*"([^"]{5,80})"', text)
+    seo_t = re.search(r'"seo_title"\s*:\s*"([^"]{1,80})"', text)
     if seo_t: data["seo_title"] = seo_t.group(1)
     seo_d = re.search(r'"seo_desc"\s*:\s*"([^"]{20,200})"', text)
     if seo_d: data["seo_desc"] = seo_d.group(1)
-    assets = re.search(r'"assets"\s*:\s*"([^"]{5,500})"', text)
+    assets = re.search(r'"assets"\s*:\s*"([^"]{5,300})"', text)
     if assets: data["assets"] = assets.group(1)
     cats_m = re.search(r'"cats"\s*:\s*\[([^\]]+)\]', text)
     if cats_m: data["cats"] = re.findall(r'"([^"]+)"', cats_m.group(1))
     ws_m = re.search(r'"wealth_sources"\s*:\s*\[([^\]]+)\]', text)
     if ws_m: data["wealth_sources"] = re.findall(r'"([^"]+)"', ws_m.group(1))
-    urls_m = re.search(r'"urls"\s*:\s*\[([^\]]*?)\]', text, re.DOTALL)
+    urls_m = re.search(r'"urls"\s*:\s*\[([^\]]*)\]', text, re.DOTALL)
     if urls_m: data["urls"] = re.findall(r'"(https?://[^"]+)"', urls_m.group(1))
-    faq_items = re.findall(r'\{"question"\s*:\s*"([^"]+)"\s*,\s*"answer"\s*:\s*"([^"]+)"\}', text)
-    if faq_items: data["faq"] = [{"question": q, "answer": a} for q, a in faq_items]
-    if data.get("net_worth"): print(f"    Regex net_worth: {data['net_worth']:,}")
     return data if len(data) >= 4 else None
 
 
 def parse_json(text):
     text = text.strip()
+
+    # DEBUG - išsaugome raw tekstą analizei
+    try:
+        with open("last_gemini_raw.txt", "w", encoding="utf-8") as dbf:
+            dbf.write(text)
+    except: pass
 
     # 1. Fix control chars + tiesiogiai
     text_fixed = fix_json_control_chars(text)
@@ -226,8 +282,12 @@ def parse_json(text):
 
     # 2. Fix HTML href quotes ("url" -> 'url') ir bandome vėl
     text_html = fix_html_quotes_in_json(text_fixed)
-    try: return json.loads(text_html)
-    except: pass
+    try:
+        return json.loads(text_html)
+    except json.JSONDecodeError as e:
+        # Logname tikslią vietą
+        snippet = text_html[max(0, e.pos-40):e.pos+40]
+        print(f"    Parse klaida pos={e.pos}: {repr(snippet)}")
 
     # 3. Nuo { iki paskutinio }
     s = text_html.find("{")
@@ -260,12 +320,13 @@ def parse_json(text):
             print(f"    JSON iš dalies atkurtas ({best_fields} laukai)")
             return best
 
-    # 5. Paskutinis bandymas - regex extraction
+    # 5. Paskutinis bandymas - regex (tik jei turime svarbiausius laukus)
     print("    Bandome regex extraction...")
     result = extract_fields_by_regex(text)
-    if result:
-        print(f"    Regex OK: {len(result)} laukai")
-        return result
+    if result and result.get("article") and result.get("net_worth") and result.get("history"):
+        print(f"    Regex OK: {len(result)} laukai - bet kelsime iš naujo Gemini")
+        # Negrąžiname regex rezultato - verčiau bandome Gemini dar kartą
+        raise ValueError(f"JSON parse nepavyko (HTML quotes problema) - reikia retry")
 
     raise ValueError(f"Nepavyko parse JSON: {text[:300]}")
 
@@ -650,7 +711,7 @@ RETURN THIS EXACT JSON STRUCTURE — every field required:
   "net_worth": 4200000,
   "job_title": "Current or most recent official title",
   "history": "2022:3000000,2023:3500000,2024:3800000,2025:4000000,2026:4200000",
-  "wealth_sources": ["Real Estate Holdings", "Book Deals & Royalties", "Stock Market Investments"],
+  "wealth_sources": ["Real Estate Holdings", "Book Deals & Royalties"],
   "assets": "One vivid specific sentence naming actual holdings with values",
   "cats": ["Most Searched Politicians", "one category from list"],
   "urls": ["https://...", "https://...", "https://..."],
@@ -665,7 +726,7 @@ RETURN THIS EXACT JSON STRUCTURE — every field required:
 }}
 
 CATEGORIES to choose from: {cats_list}
-WEALTH SOURCES — pick 2-4 that genuinely apply to this person: {wealth_list}
+WEALTH SOURCES to choose from: {wealth_list}
 SEO DESC ANGLE: {seo_angle}
 
 ⚠️ OUTPUT RULES — CRITICAL:
@@ -689,16 +750,12 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
     history       = clean_history(data.get("history", ""))
     job_title     = data.get("job_title", "").strip()
 
-    # net_worth laukas yra TIESA - history 2026 turi sutapti su juo
-    # (regex fallback kartais paima history reikšmę kaip net_worth - todėl visada sinchronizuojame)
+    # Sinchronizuojame: paskutinė history reikšmė = net_worth
     if history and net_worth_int > 0:
         h_parts = history.split(",")
         last_year = h_parts[-1].split(":")[0] if ":" in h_parts[-1] else "2026"
-        last_val = int(h_parts[-1].split(":")[1]) if ":" in h_parts[-1] else 0
-        if last_val != net_worth_int:
-            h_parts[-1] = f"{last_year}:{net_worth_int}"
-            history = ",".join(h_parts)
-            print(f"    History sync: {last_val:,} → {net_worth_int:,}")
+        h_parts[-1] = f"{last_year}:{net_worth_int}"
+        history = ",".join(h_parts)
 
     print(f"    NW: {net_worth} | history: {history.count(',') + 1 if history else 0} entries | cats: {cats}")
 
@@ -732,7 +789,7 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
             "job_title":         job_title,
             "net_worth":         net_worth,
             "net_worth_history": history,
-            "source_of_wealth":  [s for s in data.get("wealth_sources", []) if s in WEALTH_OPTIONS][:4],
+            "source_of_wealth":  [s for s in data.get("wealth_sources", []) if s in WEALTH_OPTIONS][:2],
             "main_assets":       data.get("assets", "").strip(),
             "sources":           format_sources(urls, name),
             "photo_url":         img_url_val or "",
