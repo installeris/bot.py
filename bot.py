@@ -2,7 +2,7 @@ import os, requests, json, re, time, sys, urllib.parse, random
 from datetime import datetime, timezone, timedelta
 
 sys.stdout.reconfigure(line_buffering=True)
-print("--- BOTAS STARTUOJA ---")
+print("--- BOTAS STARTUOJA v3.0 ---")
 
 GEMINI_KEY  = os.getenv("GEMINI_API_KEY")
 WP_USER     = os.getenv("WP_USERNAME")
