@@ -283,8 +283,11 @@ def validate_net_worth(n):
 
 def validate_history(h, n):
     if not h: return False, "tuscias"
-    entries = [int(m.group(2)) for part in h.split(",")
-               for m in [re.match(r"\d{4}:(\d+)", part.strip())] if m]
+    entries = []
+    for part in h.split(","):
+        m = re.match(r"(\d{4}):(\d+)", part.strip())
+        if m:
+            entries.append(int(m.group(2)))
     if len(entries) < 3: return False, f"per mazai: {len(entries)}"
     if n > 0 and abs(entries[-1]-n)/max(n,1) > 0.5: return False, "nesutampa su net_worth"
     return True, ""
