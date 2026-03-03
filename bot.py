@@ -244,7 +244,7 @@ def extract_fields_by_regex(text):
     data = {}
     art = re.search(r'"article"\s*:\s*"(.*?)(?=",\s*"(?:net_worth|job_title))', text, re.DOTALL)
     if art: data["article"] = art.group(1).replace('\\"', '"')
-    nw = re.search(r'"net_worth"\s*:\s*"?(\d+)"?', text)
+    nw = re.search(r'"net_worth"\s*:\s*(\d{5,})', text)
     if nw: data["net_worth"] = int(nw.group(1))
     jt = re.search(r'"job_title"\s*:\s*"([^"]{1,150})"', text)
     if jt: data["job_title"] = jt.group(1)
@@ -260,8 +260,11 @@ def extract_fields_by_regex(text):
     if cats_m: data["cats"] = re.findall(r'"([^"]+)"', cats_m.group(1))
     ws_m = re.search(r'"wealth_sources"\s*:\s*\[([^\]]+)\]', text)
     if ws_m: data["wealth_sources"] = re.findall(r'"([^"]+)"', ws_m.group(1))
-    urls_m = re.search(r'"urls"\s*:\s*\[([^\]]*)\]', text, re.DOTALL)
-    if urls_m: data["urls"] = re.findall(r'"(https?://[^"]+)"', urls_m.group(1))
+    urls_m = re.search(r'"urls"\s*:\s*\[([^\]]*?)\]', text, re.DOTALL)
+    if urls_m:
+        found = re.findall(r'"(https?://[^"\s]+)"', urls_m.group(1))
+        data["urls"] = [u for u in found if is_valid_source_url(u)][:5]
+    if data.get("net_worth"): print(f"    Regex net_worth: {data['net_worth']:,}")
     return data if len(data) >= 4 else None
 
 
@@ -542,6 +545,7 @@ def is_valid_source_url(url):
     return True
 
 def format_sources(urls, name=""):
+    seen = set()
     final = []
     quiver_added = False
     for url in urls:
@@ -551,11 +555,14 @@ def format_sources(urls, name=""):
                 fn, ln, bio = BIOGUIDE_MAP[name]
                 if bio:
                     ne = urllib.parse.quote(f"{fn} {ln}")
-                    final.append(f"https://www.quiverquant.com/congresstrading/politician/{ne}-{bio}")
-                    quiver_added = True
+                    qu = f"https://www.quiverquant.com/congresstrading/politician/{ne}-{bio}"
+                    final.append(qu); quiver_added = True
             continue
-        if is_valid_source_url(url):
+        if is_valid_source_url(url) and url not in seen:
+            seen.add(url)
             final.append(url)
+        if len(final) >= 5:
+            break
     if not quiver_added and name in BIOGUIDE_MAP:
         fn, ln, bio = BIOGUIDE_MAP[name]
         if bio:
@@ -607,12 +614,18 @@ def build_references_html(urls):
         "thestreet.com": "The Street", "washingtonpost.com": "Washington Post",
     }
     items = []
+    seen_domains = set()
     for url in urls:
         if not is_valid_source_url(url):
             continue
         domain = re.sub(r"https?://(www\.)?", "", url).split("/")[0]
+        if domain in seen_domains:
+            continue
+        seen_domains.add(domain)
         label = next((v for k, v in label_map.items() if k in domain), domain)
         items.append(f'<li><a href="{url}" target="_blank" rel="nofollow noopener">{label}</a></li>')
+        if len(items) >= 5:
+            break
     if not items:
         return ""
     return f"""
@@ -792,13 +805,13 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
             "job_title":         job_title,
             "net_worth":         net_worth,
             "net_worth_history": history,
-            "source_of_wealth":  [s for s in data.get("wealth_sources", []) if s in WEALTH_OPTIONS][:2],
+            "source_of_wealth":  [s for s in data.get("wealth_sources", []) if s in WEALTH_OPTIONS][:4],
             "main_assets":       data.get("assets", "").strip(),
             "sources":           format_sources(urls, name),
             "photo_url":         img_url_val or "",
         },
         "meta": {
-            "rank_math_title":         data.get("seo_title", f"{name} Net Worth 2026")[:60],
+            "rank_math_title":         f"{name} Net Worth 2026",
             "rank_math_description":   seo_desc[:160],
             "rank_math_focus_keyword": f"{name} Net Worth 2026",
         }
