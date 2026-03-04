@@ -717,25 +717,25 @@ def build_prompt(name):
 
     structures = [
         f"""- Opening hook: {angle}
-- <h2>How {name} Made Their Money</h2> — every income source with specific dollar amounts
-- <h2>{name}'s Real Estate and Key Investments</h2> — named properties, addresses, ticker symbols
-- <h2>How Rich Is {name} Compared to Other Politicians?</h2> — peer comparison with real figures
-- <h2>{name}'s Net Worth Over the Years</h2> — timeline with context, explain spikes and drops
-- <h2>What Most People Don't Know About {name}'s Finances</h2> — lesser-known facts""",
+- <h2>The Real Story Behind {name}'s Money</h2> — one surprising fact that reframes everything
+- <h2>Every Dollar: How {name} Actually Earns</h2> — all income streams with specific amounts
+- <h2>{name}'s Properties, Stocks and Business Stakes</h2> — named assets with addresses and values
+- <h2>The Years That Made (or Cost) {name} Millions</h2> — key financial turning points with numbers
+- <h2>What the Records Show: {name}'s Finances Up Close</h2> — disclosures, filings, verified facts""",
 
         f"""- Opening hook: {angle}
-- <h2>The Truth About {name}'s Money</h2> — headline fact, counterintuitive detail with source
-- <h2>How {name} Earns: Salary, Books, Speeches and More</h2> — every source with dollar amounts
-- <h2>What {name} Actually Owns</h2> — property, stocks, businesses by name and value
-- <h2>How {name}'s Wealth Has Changed</h2> — what changed and why, major financial turning points
-- <h2>Before the Spotlight: {name}'s Early Financial Life</h2> — pre-fame career and money moves""",
+- <h2>How {name} Went From [early career] to Their Current Fortune</h2> — origin story with numbers (replace bracketed text with real career detail)
+- <h2>Breaking Down {name}'s Paycheck</h2> — salary, speaking fees, royalties, dividends — itemized
+- <h2>The Assets Worth Knowing: {name}'s Portfolio in 2026</h2> — specific properties, stocks, businesses
+- <h2>Richer or Poorer? {name}'s Net Worth Year by Year</h2> — chart-style breakdown with context
+- <h2>The Financial Side of {name} That Rarely Gets Covered</h2> — obscure but verifiable details""",
 
         f"""- Opening hook: {angle}
-- <h2>Just How Rich Is {name}?</h2> — net worth figure with source, comparison to peers
-- <h2>{name}'s Income Sources Broken Down</h2> — salary, investments, side income with amounts
-- <h2>{name}'s Property and Investment Portfolio</h2> — specific assets, locations, estimated values
-- <h2>A Decade of {name}'s Wealth: The Numbers</h2> — historical figures with real context
-- <h2>The Financial Decisions That Shaped {name}'s Fortune</h2> — key moves, wins and losses""",
+- <h2>The Number Behind {name}'s Name</h2> — net worth with source, why it's higher/lower than expected
+- <h2>Where the Money Flows: {name}'s Income in Plain English</h2> — every source explained simply
+- <h2>Land, Stocks and Business: {name}'s Wealth on Paper</h2> — itemized holdings with values
+- <h2>{name}'s Wealth at [early year] vs Today</h2> — stark before/after with explanation (use real years)
+- <h2>Five Things {name}'s Financial Disclosures Actually Reveal</h2> — specific, sourced, surprising""",
     ]
     structure = random.choice(structures)
 
@@ -786,7 +786,7 @@ RETURN THIS EXACT JSON STRUCTURE — every field required:
   "assets": "One vivid specific sentence naming actual holdings with dollar values",
   "cats": ["Most Searched Politicians", "one category from list"],
   "urls": ["https://...", "https://...", "https://..."],
-  "seo_title": "{name} Net Worth 2026: [unique 3-5 word angle — total max 60 chars]",
+  "seo_title": "REQUIRED: Must follow this exact format — '{name} Net Worth 2026: [unique hook]'. The hook must reference a specific fact, contrast or surprising figure you found. Examples of good hooks: 'From Debt to $8M', 'Middle-Class Joe\\'s $10M Secret', 'From Public Service to a $70M+ Empire', 'The $7B Truth Nobody Talks About'. MAX 65 chars total. NO generic phrases like \\'Financial Journey\\' or \\'Wealth Explained\\'.",
   "seo_desc": "130-150 char description — must include the net worth figure and one surprising fact",
   "faq": [
     {{"question": "What is {name}'s net worth in 2026?", "answer": "2-3 sentences. Specific figure with source and context."}},
@@ -831,8 +831,11 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
 
     faq_items = data.get("faq", [])
     urls      = data.get("urls", [])
+    print(f"    URLs gauta: {len(urls)}, po filtro: {len([u for u in urls if is_valid_source_url(u)])}")
 
     article_html = data.get("article", "")
+    # Pašaliname literal \n tekstą (ne tikrus newlines) kuris kartais atsiranda Gemini atsakyme
+    article_html = article_html.replace('\\n', ' ').replace('\\r', '').strip()
     article_with_ids, toc_html = build_toc_html(article_html)
 
     full_article = (
