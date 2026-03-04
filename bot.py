@@ -260,8 +260,19 @@ def extract_fields_by_regex(text):
     if cats_m: data["cats"] = re.findall(r'"([^"]+)"', cats_m.group(1))
     ws_m = re.search(r'"wealth_sources"\s*:\s*\[([^\]]+)\]', text)
     if ws_m: data["wealth_sources"] = re.findall(r'"([^"]+)"', ws_m.group(1))
-    urls_m = re.search(r'"urls"\s*:\s*\[([^\]]*)\]', text, re.DOTALL)
-    if urls_m: data["urls"] = re.findall(r'"(https?://[^"]+)"', urls_m.group(1))
+    urls_m = re.search(r'"urls"\s*:\s*\[([^\]]*?)\]', text, re.DOTALL)
+    if urls_m:
+        found = re.findall(r'"(https?://[^"\s]+)"', urls_m.group(1))
+        data["urls"] = [u for u in found if is_valid_source_url(u)][:4]
+    # FAQ - traukiame visus question/answer porus
+    faq_items = re.findall(
+        r'\{\s*"question"\s*:\s*"([^"]+)"\s*,\s*"answer"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}',
+        text, re.DOTALL
+    )
+    if faq_items:
+        data["faq"] = [{"question": q, "answer": a.replace('\\"', '"')} for q, a in faq_items]
+    if data.get("net_worth"): print(f"    Regex net_worth: {data['net_worth']:,}")
+    if data.get("faq"): print(f"    Regex faq: {len(data['faq'])} items")
     return data if len(data) >= 4 else None
 
 
@@ -390,16 +401,28 @@ def check_required_fields(data):
         missing.append("history tuščia arba placeholder")
     if not str(data.get("job_title", "")).strip():
         missing.append("job_title tuščias")
-    # faq ir urls - tik įspėjimas, ne blokeris
+    # faq - jei mažiau nei 4, papildome
     faq = data.get("faq", [])
+    name_val = data.get("job_title", "this politician")
+    nw_val = data.get("net_worth", 0)
+    nw_fmt = f"${int(nw_val):,}" if str(nw_val).isdigit() else str(nw_val)
+    auto_faq = [
+        {"question": "What is their net worth in 2026?",
+         "answer": f"Estimated at {nw_fmt} based on public financial disclosures and independent research."},
+        {"question": "What are their primary income sources?",
+         "answer": data.get("assets", "Multiple income sources including investments and career earnings.")},
+        {"question": "How has their wealth changed recently?",
+         "answer": "Their net worth has evolved over recent years based on career moves, investments and market conditions."},
+        {"question": "What is their most valuable asset?",
+         "answer": data.get("assets", "Real estate and investment portfolio represent the bulk of their wealth.")},
+    ]
     if not faq:
-        print("    ĮSPĖJIMAS: faq tuščias - bus generuojamas automatiškai")
-        data["faq"] = [
-            {"question": f"What is their net worth in 2026?",
-             "answer": f"Estimated at ${int(data.get('net_worth', 0)):,} based on public disclosures."},
-            {"question": "What are their primary income sources?",
-             "answer": data.get("assets", "Multiple income sources including investments and career earnings.")},
-        ]
+        print("    ĮSPĖJIMAS: faq tuščias - generuojamas automatiškai")
+        data["faq"] = auto_faq
+    elif len(faq) < 4:
+        print(f"    ĮSPĖJIMAS: faq tik {len(faq)}/4 - papildome")
+        needed = [q for q in auto_faq if not any(q["question"] == f["question"] for f in faq)]
+        data["faq"] = faq + needed[:4 - len(faq)]
     urls = data.get("urls", [])
     if not urls:
         print("    ĮSPĖJIMAS: urls tuščias")
@@ -527,9 +550,10 @@ def resolve_categories(cat_names):
 
 
 BLOCKED_URL_PATTERNS = [
-    "vertexaisearch.cloud.google.com", "googleapis.com", "google.com/search",
+    "vertexaisearch", "googleapis.com", "google.com/search",
     "gstatic.com", "googleusercontent.com", "youtube.com/watch",
     "twitter.com", "x.com/", "facebook.com", "instagram.com", "tiktok.com",
+    "reddit.com", "wikipedia.org",
 ]
 
 def is_valid_source_url(url):
@@ -542,6 +566,7 @@ def is_valid_source_url(url):
     return True
 
 def format_sources(urls, name=""):
+    seen = set()
     final = []
     quiver_added = False
     for url in urls:
@@ -554,8 +579,11 @@ def format_sources(urls, name=""):
                     final.append(f"https://www.quiverquant.com/congresstrading/politician/{ne}-{bio}")
                     quiver_added = True
             continue
-        if is_valid_source_url(url):
+        if is_valid_source_url(url) and url not in seen:
+            seen.add(url)
             final.append(url)
+        if len(final) >= 4:
+            break
     if not quiver_added and name in BIOGUIDE_MAP:
         fn, ln, bio = BIOGUIDE_MAP[name]
         if bio:
@@ -634,12 +662,18 @@ def build_references_html(urls):
         "thestreet.com": "The Street", "washingtonpost.com": "Washington Post",
     }
     items = []
+    seen_domains = set()
     for url in urls:
         if not is_valid_source_url(url):
             continue
         domain = re.sub(r"https?://(www\.)?", "", url).split("/")[0]
+        if domain in seen_domains:
+            continue
+        seen_domains.add(domain)
         label = next((v for k, v in label_map.items() if k in domain), domain)
         items.append(f'<li><a href="{url}" target="_blank" rel="nofollow noopener">{label}</a></li>')
+        if len(items) >= 4:
+            break
     if not items:
         return ""
     return f"""
