@@ -244,7 +244,7 @@ def extract_fields_by_regex(text):
     data = {}
     art = re.search(r'"article"\s*:\s*"(.*?)(?=",\s*"(?:net_worth|job_title))', text, re.DOTALL)
     if art: data["article"] = art.group(1).replace('\\"', '"')
-    nw = re.search(r'"net_worth"\s*:\s*(\d{5,})', text)
+    nw = re.search(r'"net_worth"\s*:\s*"?(\d+)"?', text)
     if nw: data["net_worth"] = int(nw.group(1))
     jt = re.search(r'"job_title"\s*:\s*"([^"]{1,150})"', text)
     if jt: data["job_title"] = jt.group(1)
@@ -260,11 +260,8 @@ def extract_fields_by_regex(text):
     if cats_m: data["cats"] = re.findall(r'"([^"]+)"', cats_m.group(1))
     ws_m = re.search(r'"wealth_sources"\s*:\s*\[([^\]]+)\]', text)
     if ws_m: data["wealth_sources"] = re.findall(r'"([^"]+)"', ws_m.group(1))
-    urls_m = re.search(r'"urls"\s*:\s*\[([^\]]*?)\]', text, re.DOTALL)
-    if urls_m:
-        found = re.findall(r'"(https?://[^"\s]+)"', urls_m.group(1))
-        data["urls"] = [u for u in found if is_valid_source_url(u)][:5]
-    if data.get("net_worth"): print(f"    Regex net_worth: {data['net_worth']:,}")
+    urls_m = re.search(r'"urls"\s*:\s*\[([^\]]*)\]', text, re.DOTALL)
+    if urls_m: data["urls"] = re.findall(r'"(https?://[^"]+)"', urls_m.group(1))
     return data if len(data) >= 4 else None
 
 
@@ -545,7 +542,6 @@ def is_valid_source_url(url):
     return True
 
 def format_sources(urls, name=""):
-    seen = set()
     final = []
     quiver_added = False
     for url in urls:
@@ -555,20 +551,44 @@ def format_sources(urls, name=""):
                 fn, ln, bio = BIOGUIDE_MAP[name]
                 if bio:
                     ne = urllib.parse.quote(f"{fn} {ln}")
-                    qu = f"https://www.quiverquant.com/congresstrading/politician/{ne}-{bio}"
-                    final.append(qu); quiver_added = True
+                    final.append(f"https://www.quiverquant.com/congresstrading/politician/{ne}-{bio}")
+                    quiver_added = True
             continue
-        if is_valid_source_url(url) and url not in seen:
-            seen.add(url)
+        if is_valid_source_url(url):
             final.append(url)
-        if len(final) >= 5:
-            break
     if not quiver_added and name in BIOGUIDE_MAP:
         fn, ln, bio = BIOGUIDE_MAP[name]
         if bio:
             ne = urllib.parse.quote(f"{fn} {ln}")
             final.append(f"https://www.quiverquant.com/congresstrading/politician/{ne}-{bio}")
     return "\n".join(u for u in final if u)
+
+
+def build_toc_html(article_html):
+    """Generuoja Table of Contents iš H2 tagų su anchor ID"""
+    import re as _re
+    h2s = _re.findall(r'<h2[^>]*>(.*?)</h2>', article_html, _re.IGNORECASE | _re.DOTALL)
+    if len(h2s) < 2:
+        return article_html, ""
+
+    new_html = article_html
+    toc_items = []
+    for i, h2_text in enumerate(h2s):
+        clean = _re.sub('<[^>]+>', '', h2_text).strip()
+        anchor = f"toc-{i+1}-{_re.sub(r'[^a-z0-9]+', '-', clean.lower()).strip('-')[:40]}"
+        toc_items.append(f'<li style="margin:0"><a href="#{anchor}" style="color:#2563eb;text-decoration:none">{clean}</a></li>')
+        # Pridedame id į H2 tagą
+        new_html = new_html.replace(f'<h2>{h2_text}</h2>', f'<h2 id="{anchor}">{h2_text}</h2>', 1)
+
+    toc = (
+        '<div class="pnw-toc" style="background:#f8fafc;border:1px solid #e2e8f0;'
+        'border-radius:8px;padding:20px 24px;margin:0 0 32px;display:inline-block;min-width:260px;max-width:100%">'
+        '<p style="font-weight:700;font-size:15px;margin:0 0 10px;color:#0f172a">Table of Contents</p>'
+        '<ol style="margin:0;padding-left:20px;line-height:1.9">'
+        + "".join(toc_items)
+        + '</ol></div>'
+    )
+    return new_html, toc
 
 
 def build_faq_html(faq_items):
@@ -614,18 +634,12 @@ def build_references_html(urls):
         "thestreet.com": "The Street", "washingtonpost.com": "Washington Post",
     }
     items = []
-    seen_domains = set()
     for url in urls:
         if not is_valid_source_url(url):
             continue
         domain = re.sub(r"https?://(www\.)?", "", url).split("/")[0]
-        if domain in seen_domains:
-            continue
-        seen_domains.add(domain)
         label = next((v for k, v in label_map.items() if k in domain), domain)
         items.append(f'<li><a href="{url}" target="_blank" rel="nofollow noopener">{label}</a></li>')
-        if len(items) >= 5:
-            break
     if not items:
         return ""
     return f"""
@@ -669,80 +683,87 @@ def build_prompt(name):
 
     structures = [
         f"""- Opening hook: {angle}
-- <h2>Early Life and the Road to Politics</h2> — pre-political career, education, first money moves
-- <h2>How {name} Built Their Fortune</h2> — income sources with specific dollar amounts
-- <h2>Real Estate, Stocks and Key Investments</h2> — named holdings, addresses, ticker symbols
-- <h2>Net Worth Timeline: The Numbers Over the Years</h2> — changes with context, explain spikes/drops
-- <h2>Financial Controversies and Lesser-Known Facts</h2> — interesting facts most people don't know""",
+- <h2>How {name} Made Their Money</h2> — every income source with specific dollar amounts
+- <h2>{name}'s Real Estate and Key Investments</h2> — named properties, addresses, ticker symbols
+- <h2>How Rich Is {name} Compared to Other Politicians?</h2> — peer comparison with real figures
+- <h2>{name}'s Net Worth Over the Years</h2> — timeline with context, explain spikes and drops
+- <h2>What Most People Don't Know About {name}'s Finances</h2> — lesser-known facts""",
 
         f"""- Opening hook: {angle}
-- <h2>The Surprising Truth About {name}'s Money</h2> — headline fact, counterintuitive detail
-- <h2>Income Streams Explained</h2> — every source: salary, books, speeches, businesses
+- <h2>The Truth About {name}'s Money</h2> — headline fact, counterintuitive detail with source
+- <h2>How {name} Earns: Salary, Books, Speeches and More</h2> — every source with dollar amounts
 - <h2>What {name} Actually Owns</h2> — property, stocks, businesses by name and value
-- <h2>Wealth Growth: Year by Year</h2> — what changed and why, major financial events
-- <h2>Background: Before the Spotlight</h2> — pre-fame financial life and career origins""",
+- <h2>How {name}'s Wealth Has Changed</h2> — what changed and why, major financial turning points
+- <h2>Before the Spotlight: {name}'s Early Financial Life</h2> — pre-fame career and money moves""",
 
         f"""- Opening hook: {angle}
 - <h2>Just How Rich Is {name}?</h2> — net worth figure with source, comparison to peers
-- <h2>Where the Money Comes From</h2> — income breakdown with actual dollar amounts per source
-- <h2>The Portfolio: Investments and Property</h2> — specific assets, locations, estimated values
-- <h2>A Decade of Wealth: How the Numbers Moved</h2> — historical context with real figures
-- <h2>The Story Behind the Money</h2> — career origins, key financial decisions""",
+- <h2>{name}'s Income Sources Broken Down</h2> — salary, investments, side income with amounts
+- <h2>{name}'s Property and Investment Portfolio</h2> — specific assets, locations, estimated values
+- <h2>A Decade of {name}'s Wealth: The Numbers</h2> — historical figures with real context
+- <h2>The Financial Decisions That Shaped {name}'s Fortune</h2> — key moves, wins and losses""",
     ]
     structure = random.choice(structures)
 
-    seo_angles = [
-        f"How did {name} actually make their money? Full breakdown of income, investments and net worth 2026.",
-        f"Surprising facts about {name}'s net worth in 2026 — where it came from and how it grew.",
-        f"Complete financial profile: {name}'s salary, assets, investments and estimated net worth for 2026.",
-        f"The real story behind {name}'s fortune — verified sources, key assets and the numbers.",
-        f"What is {name} really worth? Full breakdown of income sources, property and net worth 2026.",
-    ]
-    seo_angle = random.choice(seo_angles)
+    seo_angle = f"Write a completely unique meta description for {name} based on the most surprising or interesting financial fact you find. Include the actual net worth figure. 130-150 characters. No generic templates."
 
-    return f"""You are an investigative financial journalist. Write a deeply researched, unique financial profile of {name} for a general audience.
+    return f"""You are a financial reporter writing for a general audience. Write a unique, well-researched profile of {name}'s finances.
 
 CRITICAL — NET WORTH ACCURACY: Use your Google Search tool RIGHT NOW to find the latest 2025-2026 net worth for {name}. Search: "{name} net worth 2025 Forbes". Training data is outdated — always use search results for the actual figure. Net worths change drastically (e.g. Trump went from $3B to $7B+ after Truth Social IPO).
 
-RULES:
-- Article MUST be 950-1150 words
+WRITING RULES:
+- Article MUST be 1050-1250 words
+- Article MUST have minimum 5 H2 sections
 - ONLY verified real facts — no invented numbers
-- BANNED phrases: "it's worth noting", "delve into", "in conclusion", "moreover", "furthermore", "navigating", "landscape", "testament to", "shed light on", "pivotal role", "net worth journey", "financial journey", "in the world of"
-- Vary sentence length — short punchy sentences mixed with longer analytical ones
-- Use specific sourced numbers: "$47,000 Senate salary" not "congressional salary"
+- Use specific numbers: "$47,000 Senate salary" not "congressional salary"
 - Include 2+ facts most people genuinely don't know about this person's finances
-- Write conversationally — smart friend explaining, not Wikipedia
+- Write like a smart friend explaining — not a textbook, not Wikipedia
+- Short punchy sentences mixed with longer ones. Vary the rhythm.
+- Be specific: "a $2.1M condo in Georgetown" beats "Washington D.C. property"
+
+BANNED WORDS AND PHRASES — never use these:
+"it's worth noting", "delve into", "in conclusion", "moreover", "furthermore",
+"navigating", "landscape", "testament to", "shed light on", "pivotal role",
+"net worth journey", "financial journey", "in the world of", "underscores",
+"showcases", "lucrative", "multifaceted", "demonstrates", "significant",
+"notably", "it is important to note", "interestingly", "this allowed him/her to",
+"leveraged", "garnered", "accumulated wealth", "amassed", "robust portfolio"
 
 ARTICLE STRUCTURE:
 {structure}
 
 TONE:
-- Opening: grab attention immediately, no "born in..." intros
-- Mix data with story — numbers need context
-- Be specific: "a $2.1M condo in Georgetown" beats "Washington D.C. property"
+- Opening: grab attention immediately — a surprising number, a contrast, a little-known fact. Never start with "born in..."
+- Mix data with story — numbers need context and human interest
+- Avoid corporate/AI-sounding language. Write the way a journalist would actually talk.
+
+FAQ RULES — ALL 4 ARE REQUIRED, no exceptions:
+- Each answer must be 2-3 sentences with specific figures
+- Questions should be what real people actually Google
+- Answers must directly answer the question — no filler
 
 RETURN THIS EXACT JSON STRUCTURE — every field required:
 {{
-  "article": "<p>Hook...</p><h2>...</h2><p>...</p>... (full HTML, 950-1150 words)",
+  "article": "<p>Hook...</p><h2>...</h2><p>...</p>... (full HTML, 1050-1250 words, minimum 5 H2 sections)",
   "net_worth": 4200000,
   "job_title": "Current or most recent official title",
   "history": "2022:3000000,2023:3500000,2024:3800000,2025:4000000,2026:4200000",
-  "wealth_sources": ["Real Estate Holdings", "Book Deals & Royalties"],
-  "assets": "One vivid specific sentence naming actual holdings with values",
+  "wealth_sources": ["Real Estate Holdings", "Book Deals & Royalties", "Stock Market Investments"],
+  "assets": "One vivid specific sentence naming actual holdings with dollar values",
   "cats": ["Most Searched Politicians", "one category from list"],
   "urls": ["https://...", "https://...", "https://..."],
-  "seo_title": "{name} Net Worth 2026",
-  "seo_desc": "130-155 char unique description",
+  "seo_title": "{name} Net Worth 2026: [unique 3-5 word angle — total max 60 chars]",
+  "seo_desc": "130-150 char description — must include the net worth figure and one surprising fact",
   "faq": [
-    {{"question": "What is {name}'s net worth in 2026?", "answer": "Direct answer with figure and source."}},
-    {{"question": "How did {name} make their money?", "answer": "Specific income sources with amounts."}},
-    {{"question": "What is {name}'s most valuable asset?", "answer": "Specific asset with estimated value."}},
-    {{"question": "How has {name}'s net worth changed recently?", "answer": "Recent change with context."}}
+    {{"question": "What is {name}'s net worth in 2026?", "answer": "2-3 sentences. Specific figure with source and context."}},
+    {{"question": "How did {name} make their money?", "answer": "2-3 sentences. Specific income sources with dollar amounts."}},
+    {{"question": "What is {name}'s most valuable asset?", "answer": "2-3 sentences. Specific asset with estimated value."}},
+    {{"question": "How has {name}'s wealth changed over time?", "answer": "2-3 sentences. Key turning points with numbers."}}
   ]
 }}
 
 CATEGORIES to choose from: {cats_list}
-WEALTH SOURCES to choose from: {wealth_list}
+WEALTH SOURCES to choose from (pick 2-4 that genuinely apply): {wealth_list}
 SEO DESC ANGLE: {seo_angle}
 
 ⚠️ OUTPUT RULES — CRITICAL:
@@ -750,8 +771,8 @@ SEO DESC ANGLE: {seo_angle}
 2. End with }} — nothing after it
 3. No markdown, no ```json, no explanations
 4. net_worth must be a plain integer (no quotes, no $ sign)
-5. All 11 fields are REQUIRED — missing any field = failure
-6. In the "article" HTML field: DO NOT use any HTML links or anchor tags at all. No <a href=...> tags. Plain HTML only: <p>, <h2>, <h3>, <strong>, <em>, <ul>, <li>. Links break the JSON parser."""
+5. All 11 fields are REQUIRED — missing any = failure. FAQ must have exactly 4 items.
+6. In the "article" field: NO HTML links or anchor tags. Use only: <p>, <h2>, <h3>, <strong>, <em>, <ul>, <li>. Links break the JSON parser."""
 
 
 # ─── WORDPRESS ───────────────────────────────────────────────────────────────
@@ -766,24 +787,23 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
     history       = clean_history(data.get("history", ""))
     job_title     = data.get("job_title", "").strip()
 
-    # Sinchronizuojame: paskutinė history reikšmė = net_worth
-    if history and net_worth_int > 0:
-        h_parts = history.split(",")
-        last_year = h_parts[-1].split(":")[0] if ":" in h_parts[-1] else "2026"
-        h_parts[-1] = f"{last_year}:{net_worth_int}"
-        history = ",".join(h_parts)
-
     print(f"    NW: {net_worth} | history: {history.count(',') + 1 if history else 0} entries | cats: {cats}")
 
     seo_desc = data.get("seo_desc", "").strip()
     if len(seo_desc) < 50:
         seo_desc = f"Complete financial profile of {name}: net worth, income sources, assets and wealth history for 2026."
+    if len(seo_desc) > 150:
+        seo_desc = seo_desc[:150].rsplit(' ', 1)[0]
 
     faq_items = data.get("faq", [])
     urls      = data.get("urls", [])
 
+    article_html = data.get("article", "")
+    article_with_ids, toc_html = build_toc_html(article_html)
+
     full_article = (
-        data.get("article", "")
+        toc_html
+        + article_with_ids
         + build_faq_html(faq_items)
         + build_references_html(urls)
     )
@@ -811,8 +831,8 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
             "photo_url":         img_url_val or "",
         },
         "meta": {
-            "rank_math_title":         f"{name} Net Worth 2026",
-            "rank_math_description":   seo_desc[:160],
+            "rank_math_title":         data.get("seo_title", f"{name} Net Worth 2026")[:60],
+            "rank_math_description":   seo_desc[:150],
             "rank_math_focus_keyword": f"{name} Net Worth 2026",
         }
     }
