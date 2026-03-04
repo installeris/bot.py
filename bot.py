@@ -763,7 +763,17 @@ def build_prompt(name):
 
     return f"""You are a financial reporter writing for a general audience. Write a unique, well-researched profile of {name}'s finances.
 
-CRITICAL — NET WORTH ACCURACY: Use your Google Search tool RIGHT NOW to find the latest 2025-2026 net worth for {name}. Search: "{name} net worth 2025 Forbes". Training data is outdated — always use search results for the actual figure. Net worths change drastically (e.g. Trump went from $3B to $7B+ after Truth Social IPO).
+CRITICAL — NET WORTH ACCURACY:
+1. Use your Google Search tool RIGHT NOW. Search: "{name} net worth 2026" and "{name} net worth Forbes 2025".
+2. Use the MOST WIDELY CITED estimate from credible sources (Forbes, Bloomberg, Celebrity Net Worth).
+3. "net_worth" MUST be the PERSONAL net worth — money that belongs to this person individually.
+   - For politicians who control state funds or organizations: use their PERSONAL wealth only, NOT the assets they oversee.
+   - Example: Ali Khamenei personally owns ~$200M, but controls Setad ($95B+) — net_worth = 200000000
+   - Example: Trump personally owns ~$7.3B in 2026 (after Truth Social IPO) — net_worth = 7300000000
+4. "history" MUST reflect REAL year-by-year changes based on search results — not a made-up trend line.
+   - Use actual events: elections won/lost, book deals, stock crashes, business failures, IPOs
+   - If wealth went DOWN in a year, show that. Real history is not always a straight line up.
+   - history MUST end with the same value as net_worth (e.g. if net_worth=7300000000, last history entry must be 2026:7300000000)
 
 WRITING RULES:
 - Article MUST be 1050-1250 words
@@ -799,9 +809,9 @@ FAQ RULES — ALL 4 ARE REQUIRED, no exceptions:
 RETURN THIS EXACT JSON STRUCTURE — every field required:
 {{
   "article": "<p>Hook...</p><h2>...</h2><p>...</p>... (full HTML, 1050-1250 words, minimum 5 H2 sections)",
-  "net_worth": 4200000,
+  "net_worth": 7300000000,
   "job_title": "Current or most recent official title",
-  "history": "2022:3000000,2023:3500000,2024:3800000,2025:4000000,2026:4200000",
+  "history": "2018:2500000000,2020:2800000000,2022:3000000000,2024:4200000000,2025:7300000000,2026:7300000000",
   "wealth_sources": ["Real Estate Holdings", "Book Deals & Royalties", "Stock Market Investments"],
   "assets": "One vivid specific sentence naming actual holdings with dollar values",
   "cats": ["Most Searched Politicians", "one category from list"],
