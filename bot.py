@@ -368,16 +368,20 @@ def extract_text_from_gemini(res):
         grounding_urls = []
         gm = cand.get("groundingMetadata", {})
         all_chunks = gm.get("groundingChunks", [])
-        print(f"    groundingChunks: {len(all_chunks)}, keys: {list(gm.keys())[:5]}")
-        for chunk in all_chunks:
-            url = chunk.get("web", {}).get("uri", "")
-            if url:
-                valid = is_valid_source_url(url)
-                print(f"    chunk url: {url[:80]} valid={valid}")
-                if valid:
-                    grounding_urls.append(url)
-        if grounding_urls:
-            print(f"    Grounding URLs gauta: {len(grounding_urls)}")
+        print(f"    groundingChunks: {len(all_chunks)}")
+
+        # webSearchQueries - paieškos užklausos (ne URL, bet matyti kas ieškota)
+        wsq = gm.get("webSearchQueries", [])
+        if wsq: print(f"    webSearchQueries: {wsq[:3]}")
+
+        # groundingSupports - gali turėti tikrus URL
+        supports = gm.get("groundingSupports", [])
+        if supports:
+            print(f"    groundingSupports[0] keys: {list(supports[0].keys()) if supports else []}")
+            print(f"    groundingSupports[0]: {str(supports[0])[:200]}")
+
+        # Visi chunk URL yra vertexaisearch redirect - nerealūs, praleisti
+        # Vietoj to imsime iš Gemini JSON "urls" lauko arba generuosime iš webSearchQueries
 
         # Su google_search Gemini gali grąžinti: [search_results_text, json_text]
         json_text = None
