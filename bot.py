@@ -61,6 +61,32 @@ WEALTH_OPTIONS = [
     "Corporate Board Seats", "Consulting Fees", "Hedge Fund Interests", "Cryptocurrency Assets",
 ]
 
+# Žinomi net worth skaičiai iš patikimų šaltinių (Forbes/Bloomberg/CelebrityNetWorth)
+# Naudojami kaip validacija - jei Gemini grąžina >3x ar <0.3x šio skaičiaus, įspėjame
+KNOWN_NET_WORTHS = {
+    "Donald Trump":           7300000000,
+    "Barack Obama":           70000000,
+    "Joe Biden":              10000000,
+    "Kamala Harris":          8000000,
+    "Hillary Clinton":        50000000,
+    "Bernie Sanders":         3000000,
+    "Nancy Pelosi":           260000000,
+    "Mike Bloomberg":         110000000000,
+    "Elon Musk":              300000000000,
+    "Ali Khamenei":           95000000000,
+    "Michelle Obama":         70000000,
+    "George W. Bush":         50000000,
+    "Bill Clinton":           120000000,
+    "Nikki Haley":            8000000,
+    "Ron DeSantis":           2000000,
+    "Gavin Newsom":           20000000,
+    "Marco Rubio":            2000000,
+    "Ted Cruz":               4000000,
+    "Mitt Romney":            300000000,
+    "Alexandria Ocasio-Cortez": 200000,
+    "Pete Buttigieg":         1500000,
+}
+
 CAT_MAP = {
     "US Senate": 1, "US House of Representatives": 2, "Executive Branch": 3,
     "Former Presidents": 28, "Vice Presidents": 29, "Cabinet Members": 30,
@@ -402,6 +428,18 @@ def extract_text_from_gemini(res):
         return json_text, grounding_urls, None
     except Exception as e:
         return None, None, str(e)
+
+
+def validate_net_worth(name, net_worth_int):
+    """Tikrina ar net_worth realistiškas. Jei per toli nuo žinomo – override."""
+    known = KNOWN_NET_WORTHS.get(name)
+    if not known or net_worth_int <= 0:
+        return net_worth_int
+    ratio = net_worth_int / known
+    if ratio > 3.0 or ratio < 0.25:
+        print(f"    ⚠️ NW {net_worth_int:,} neatitinka žinomo {known:,} (ratio={ratio:.1f}x) → naudojame žinomą")
+        return known
+    return net_worth_int
 
 
 def check_required_fields(data):
@@ -781,17 +819,18 @@ Structure: opening hook → 5 unique H2 sections that tell {name}'s specific fin
     return f"""You are a financial reporter writing for a general audience. Write a unique, well-researched profile of {name}'s finances.
 
 CRITICAL — NET WORTH ACCURACY:
-1. Use your Google Search tool RIGHT NOW. Search: "{name} net worth 2026" and "{name} net worth Forbes 2025".
-2. Use the MOST WIDELY CITED personal net worth estimate from credible sources.
-3. "net_worth" MUST be PERSONAL wealth ONLY — money that legally belongs to this individual.
-   IMPORTANT DISTINCTION:
-   - Assets they CONTROL or OVERSEE for an organization/state = NOT their personal net worth
-   - Assets they PERSONALLY OWN = their net worth
-   - Example: Ali Khamenei's PERSONAL declared wealth ≈ $200,000 (two hundred thousand dollars = 200000)
-     His organization Setad controls $95B+ but that is NOT his personal money → net_worth = 200000
-   - Example: Trump PERSONALLY owns businesses/real estate worth ~$7.3B → net_worth = 7300000000
-   - Example: Obama PERSONALLY owns homes, stocks, book royalties worth ~$70M → net_worth = 70000000
-4. "history" must reflect REAL verified changes — show declines if they happened, not just growth.
+1. Search RIGHT NOW: "{name} net worth 2026" + "{name} net worth site:forbes.com OR site:bloomberg.com OR site:celebritynetworth.com"
+2. Use the figure that appears MOST OFTEN across credible sources. Do not invent or average.
+3. Use the MOST COMMONLY REPORTED net worth figure — even if it includes controlled assets:
+   - Ali Khamenei: most sources cite ~$95 billion (Setad empire) → net_worth = 95000000000
+   - Donald Trump: Forbes 2025 cites ~$7.3B → net_worth = 7300000000
+   - Kamala Harris: OpenSecrets/Forbes cite ~$8M → net_worth = 8000000
+   - Barack Obama: Celebrity Net Worth cites ~$70M → net_worth = 70000000
+4. NEVER invent a figure. If sources conflict, use the LOWER credible estimate.
+5. "history" must use REAL verified figures for each year — not a trend line you made up.
+   - Search: "{name} net worth [year]" for multiple years if needed
+   - Show real declines if they happened
+   - Last entry MUST equal net_worth exactly
 
 WRITING RULES:
 - Article MUST be 1050-1250 words
@@ -873,6 +912,8 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
     nw_raw        = data.get("net_worth", 0)
     net_worth     = clean_net_worth(nw_raw)
     net_worth_int = int(net_worth) if net_worth.isdigit() else 0
+    net_worth_int = validate_net_worth(name, net_worth_int)
+    net_worth     = str(net_worth_int) if net_worth_int > 0 else net_worth
     history       = clean_history(data.get("history", ""))
     job_title     = data.get("job_title", "").strip()
 
