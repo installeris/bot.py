@@ -346,9 +346,9 @@ def parse_json(text):
 
 
 def extract_text_from_gemini(res):
-    """Ištraukia JSON tekstą iš Gemini atsakymo, grąžina (text, error)"""
+    """Ištraukia JSON tekstą ir grounding URLs iš Gemini atsakymo"""
     if not res or "candidates" not in res:
-        return None, "no candidates"
+        return None, None, "no candidates"
     try:
         cand = res["candidates"][0]
         reason = cand.get("finishReason", "UNKNOWN")
@@ -360,12 +360,21 @@ def extract_text_from_gemini(res):
         print(f"    {len(full_text)} simboliu, reason: {reason}, parts: {len(text_parts)}")
 
         if reason == "MAX_TOKENS":
-            return None, "MAX_TOKENS"
+            return None, None, "MAX_TOKENS"
         if not full_text:
-            return None, "tuscias atsakymas"
+            return None, None, "tuscias atsakymas"
+
+        # Ištraukiame grounding URLs iš metadata (realios Google Search nuorodos)
+        grounding_urls = []
+        gm = cand.get("groundingMetadata", {})
+        for chunk in gm.get("groundingChunks", []):
+            url = chunk.get("web", {}).get("uri", "")
+            if url and is_valid_source_url(url):
+                grounding_urls.append(url)
+        if grounding_urls:
+            print(f"    Grounding URLs: {len(grounding_urls)}")
 
         # Su google_search Gemini gali grąžinti: [search_results_text, json_text]
-        # Ieškome paskutinio part kuris prasideda { - tai bus JSON
         json_text = None
         for part in reversed(text_parts):
             if part.startswith("{"):
@@ -373,18 +382,17 @@ def extract_text_from_gemini(res):
                 print(f"    Rastas JSON part ({len(json_text)} chars)")
                 break
 
-        # Jei nerado grynojo JSON part - ieškome { visame tekste
         if not json_text:
             brace = full_text.find("{")
             if brace != -1:
                 json_text = full_text[brace:]
                 print(f"    JSON rasta pozicijoje {brace}")
             else:
-                return None, f"nera JSON: {full_text[:150]}"
+                return None, grounding_urls, f"nera JSON: {full_text[:150]}"
 
-        return json_text, None
+        return json_text, grounding_urls, None
     except Exception as e:
-        return None, str(e)
+        return None, None, str(e)
 
 
 def check_required_fields(data):
@@ -529,6 +537,18 @@ def clean_history(raw):
             n = parse_to_int(m.group(2))
             if n > 0: entries.append(f"{m.group(1)}:{n}")
     return ",".join(entries)
+
+
+def fix_history_last(history, net_worth_int):
+    """Paskutinė history reikšmė VISADA = net_worth"""
+    if not history or net_worth_int <= 0:
+        return history
+    parts = history.split(",")
+    last = parts[-1]
+    if ":" in last:
+        year = last.split(":")[0]
+        parts[-1] = f"{year}:{net_worth_int}"
+    return ",".join(parts)
 
 
 def make_slug(name):
@@ -850,7 +870,7 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
     print(f"    Suplanuota: {schedule_str}")
 
     payload = {
-        "title":          f"{name} Net Worth 2026",
+        "title":          data.get("seo_title", f"{name} Net Worth 2026")[:70],
         "slug":           make_slug(name),
         "content":        full_article,
         "status":         "future",
@@ -861,14 +881,14 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
         "acf": {
             "job_title":         job_title,
             "net_worth":         net_worth,
-            "net_worth_history": history,
+            "net_worth_history": fix_history_last(history, net_worth_int),
             "source_of_wealth":  [s for s in data.get("wealth_sources", []) if s in WEALTH_OPTIONS][:4],
             "main_assets":       data.get("assets", "").strip(),
             "sources":           format_sources(urls, name),
             "photo_url":         img_url_val or "",
         },
         "meta": {
-            "rank_math_title":         data.get("seo_title", f"{name} Net Worth 2026")[:60],
+            "rank_math_title":         data.get("seo_title", f"{name} Net Worth 2026")[:65],
             "rank_math_description":   seo_desc[:150],
             "rank_math_focus_keyword": f"{name} Net Worth 2026",
         }
@@ -956,7 +976,7 @@ def run_bot(name, gemini_url):
             time.sleep(10)
 
         res = call_gemini(build_prompt(name), gemini_url)
-        text, err = extract_text_from_gemini(res)
+        text, grounding_urls, err = extract_text_from_gemini(res)
 
         if err:
             print(f"    Gemini klaida: {err}")
@@ -971,6 +991,12 @@ def run_bot(name, gemini_url):
         except Exception as e:
             print(f"    JSON parse klaida: {e}")
             continue
+
+        # Papildome URLs iš grounding metadata jei JSON urls tuščias/mažas
+        if grounding_urls:
+            existing = parsed.get("urls", [])
+            merged = existing + [u for u in grounding_urls if u not in existing]
+            parsed["urls"] = merged[:6]  # max 6, format_sources sutrumpins iki 4
 
         missing = check_required_fields(parsed)
         if missing:
