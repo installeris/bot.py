@@ -367,12 +367,17 @@ def extract_text_from_gemini(res):
         # Ištraukiame grounding URLs iš metadata (realios Google Search nuorodos)
         grounding_urls = []
         gm = cand.get("groundingMetadata", {})
-        for chunk in gm.get("groundingChunks", []):
+        all_chunks = gm.get("groundingChunks", [])
+        print(f"    groundingChunks: {len(all_chunks)}, keys: {list(gm.keys())[:5]}")
+        for chunk in all_chunks:
             url = chunk.get("web", {}).get("uri", "")
-            if url and is_valid_source_url(url):
-                grounding_urls.append(url)
+            if url:
+                valid = is_valid_source_url(url)
+                print(f"    chunk url: {url[:80]} valid={valid}")
+                if valid:
+                    grounding_urls.append(url)
         if grounding_urls:
-            print(f"    Grounding URLs: {len(grounding_urls)}")
+            print(f"    Grounding URLs gauta: {len(grounding_urls)}")
 
         # Su google_search Gemini gali grąžinti: [search_results_text, json_text]
         json_text = None
@@ -954,12 +959,22 @@ def run_bot(name, gemini_url):
                 acf   = pdata.get("acf", {})
                 nw    = str(acf.get("net_worth", "")).strip()
                 art   = pdata.get("content", {}).get("rendered", "")
-                faq_present = "pnw-faq-wrap" in art
-                if not nw or nw == "0" or len(art) < 500 or not faq_present:
-                    missing_info = []
-                    if not nw or nw == "0": missing_info.append("net_worth")
-                    if len(art) < 500: missing_info.append(f"article ({len(art)} chars)")
-                    if not faq_present: missing_info.append("FAQ")
+                src   = str(acf.get("sources", "")).strip()
+                title = pdata.get("title", {}).get("rendered", "")
+                faq_present   = "pnw-faq-wrap" in art
+                toc_present   = "pnw-toc" in art
+                title_has_hook = ":" in title  # "Name Net Worth 2026: Hook"
+                sources_ok    = src and "http" in src
+
+                missing_info = []
+                if not nw or nw == "0":          missing_info.append("net_worth")
+                if len(art) < 500:               missing_info.append(f"article({len(art)})")
+                if not faq_present:              missing_info.append("FAQ")
+                if not toc_present:              missing_info.append("TOC")
+                if not sources_ok:               missing_info.append("sources")
+                if not title_has_hook:           missing_info.append("title_hook")
+
+                if missing_info:
                     print(f"  ID:{post_id} – trūksta: {', '.join(missing_info)} → ATNAUJINSIME")
                     needs_update = True
                 else:
