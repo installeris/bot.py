@@ -745,26 +745,34 @@ def build_prompt(name):
     angle = random.choice(angles)
 
     structures = [
-        f"""- Opening hook: {angle}
-- <h2>The Real Story Behind {name}'s Money</h2> — one surprising fact that reframes everything
-- <h2>Every Dollar: How {name} Actually Earns</h2> — all income streams with specific amounts
-- <h2>{name}'s Properties, Stocks and Business Stakes</h2> — named assets with addresses and values
-- <h2>The Years That Made (or Cost) {name} Millions</h2> — key financial turning points with numbers
-- <h2>What the Records Show: {name}'s Finances Up Close</h2> — disclosures, filings, verified facts""",
+        f"""ANGLE: {angle}
 
-        f"""- Opening hook: {angle}
-- <h2>How {name} Went From [early career] to Their Current Fortune</h2> — origin story with numbers (replace bracketed text with real career detail)
-- <h2>Breaking Down {name}'s Paycheck</h2> — salary, speaking fees, royalties, dividends — itemized
-- <h2>The Assets Worth Knowing: {name}'s Portfolio in 2026</h2> — specific properties, stocks, businesses
-- <h2>Richer or Poorer? {name}'s Net Worth Year by Year</h2> — chart-style breakdown with context
-- <h2>The Financial Side of {name} That Rarely Gets Covered</h2> — obscure but verifiable details""",
+Create 5 H2 headings that are SPECIFIC to {name} — based on actual facts you find about them.
+DO NOT use generic headings like "Income Streams Explained" or "The Number Behind X's Name".
+Each H2 must reference something REAL and SPECIFIC about {name}'s finances.
 
-        f"""- Opening hook: {angle}
-- <h2>The Number Behind {name}'s Name</h2> — net worth with source, why it's higher/lower than expected
-- <h2>Where the Money Flows: {name}'s Income in Plain English</h2> — every source explained simply
-- <h2>Land, Stocks and Business: {name}'s Wealth on Paper</h2> — itemized holdings with values
-- <h2>{name}'s Wealth at [early year] vs Today</h2> — stark before/after with explanation (use real years)
-- <h2>Five Things {name}'s Financial Disclosures Actually Reveal</h2> — specific, sourced, surprising""",
+Examples of GOOD specific H2s (these are just examples — create your own based on {name}'s actual story):
+- "How Mar-a-Lago Became Trump's Cash Machine" (specific property)
+- "The $65M Obama Book Deal That Changed Everything" (specific deal with amount)
+- "From $-1M Debt to $8M: Nikki Haley's Fastest Payday" (specific contrast)
+- "Why Sanders Owns 3 Houses on a Senator's Salary" (specific counterintuitive fact)
+- "The Setad Fund: Khamenei's $95B Shadow Empire" (specific organization)
+
+Structure: opening hook → 5 unique H2 sections based on {name}'s real financial story""",
+
+        f"""ANGLE: {angle}
+
+Write 5 H2 headings that could ONLY apply to {name} — not to any other politician.
+Each heading must contain either: a specific dollar amount, a specific asset name, a specific year, or a specific surprising fact.
+
+Structure: opening hook → 5 unique H2 sections. Each section must feel like it belongs in a magazine profile of {name} specifically.""",
+
+        f"""ANGLE: {angle}
+
+Your H2 headings must be so specific that a reader instantly knows this article is about {name}.
+Use real names of properties, real dollar figures, real years, real events from {name}'s financial history.
+
+Structure: opening hook → 5 unique H2 sections that tell {name}'s specific financial story from search results.""",
     ]
     structure = random.choice(structures)
 
@@ -774,15 +782,16 @@ def build_prompt(name):
 
 CRITICAL — NET WORTH ACCURACY:
 1. Use your Google Search tool RIGHT NOW. Search: "{name} net worth 2026" and "{name} net worth Forbes 2025".
-2. Use the MOST WIDELY CITED estimate from credible sources (Forbes, Bloomberg, Celebrity Net Worth).
-3. "net_worth" MUST be the PERSONAL net worth — money that belongs to this person individually.
-   - For politicians who control state funds or organizations: use their PERSONAL wealth only, NOT the assets they oversee.
-   - Example: Ali Khamenei personally owns ~$200M, but controls Setad ($95B+) — net_worth = 200000000
-   - Example: Trump personally owns ~$7.3B in 2026 (after Truth Social IPO) — net_worth = 7300000000
-4. "history" MUST reflect REAL year-by-year changes based on search results — not a made-up trend line.
-   - Use actual events: elections won/lost, book deals, stock crashes, business failures, IPOs
-   - If wealth went DOWN in a year, show that. Real history is not always a straight line up.
-   - history MUST end with the same value as net_worth (e.g. if net_worth=7300000000, last history entry must be 2026:7300000000)
+2. Use the MOST WIDELY CITED personal net worth estimate from credible sources.
+3. "net_worth" MUST be PERSONAL wealth ONLY — money that legally belongs to this individual.
+   IMPORTANT DISTINCTION:
+   - Assets they CONTROL or OVERSEE for an organization/state = NOT their personal net worth
+   - Assets they PERSONALLY OWN = their net worth
+   - Example: Ali Khamenei's PERSONAL declared wealth ≈ $200,000 (two hundred thousand dollars = 200000)
+     His organization Setad controls $95B+ but that is NOT his personal money → net_worth = 200000
+   - Example: Trump PERSONALLY owns businesses/real estate worth ~$7.3B → net_worth = 7300000000
+   - Example: Obama PERSONALLY owns homes, stocks, book royalties worth ~$70M → net_worth = 70000000
+4. "history" must reflect REAL verified changes — show declines if they happened, not just growth.
 
 WRITING RULES:
 - Article MUST be 1050-1250 words
@@ -824,7 +833,7 @@ RETURN THIS EXACT JSON STRUCTURE — every field required:
   "wealth_sources": ["Real Estate Holdings", "Book Deals & Royalties", "Stock Market Investments"],
   "assets": "One vivid specific sentence naming actual holdings with dollar values",
   "cats": ["Most Searched Politicians", "one category from list"],
-  "urls": ["https://...", "https://...", "https://..."],
+  "urls": ["https://forbes.com/...", "https://opensecrets.org/...", "https://example.com/..."],
   "seo_title": "REQUIRED: Must follow this exact format — '{name} Net Worth 2026: [unique hook]'. The hook must reference a specific fact, contrast or surprising figure you found. Examples of good hooks: 'From Debt to $8M', 'Middle-Class Joe\\'s $10M Secret', 'From Public Service to a $70M+ Empire', 'The $7B Truth Nobody Talks About'. MAX 65 chars total. NO generic phrases like \\'Financial Journey\\' or \\'Wealth Explained\\'.",
   "seo_desc": "130-150 char description — must include the net worth figure and one surprising fact",
   "faq": [
@@ -838,6 +847,13 @@ RETURN THIS EXACT JSON STRUCTURE — every field required:
 CATEGORIES to choose from: {cats_list}
 WEALTH SOURCES to choose from (pick 2-4 that genuinely apply): {wealth_list}
 SEO DESC ANGLE: {seo_angle}
+
+URLS RULES — CRITICAL:
+- "urls" must contain 3-4 REAL, WORKING URLs from credible sources you actually used
+- Use: forbes.com, bloomberg.com, opensecrets.org, ballotpedia.org, reuters.com, apnews.com, cnbc.com, businessinsider.com, thestreet.com, washingtonpost.com, nytimes.com, politico.com
+- DO NOT use vertexaisearch, google.com, youtube.com, twitter.com, facebook.com, instagram.com, wikipedia.org
+- If you cannot find exact article URLs, use the homepage of the source (e.g. "https://www.forbes.com/profile/donald-trump/")
+- NEVER leave urls as ["https://...", ...] — always put real URLs
 
 ⚠️ OUTPUT RULES — CRITICAL:
 1. Start your response with {{ — nothing before it
