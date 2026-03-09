@@ -1,109 +1,172 @@
 #!/usr/bin/env python3
-import os, requests, json, re, time, sys
+import os, requests, json, re, time, sys, urllib.parse
 from datetime import datetime
 
 sys.stdout.reconfigure(line_buffering=True)
-
 log_file = f"fix_sources_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 with open(log_file, "w") as f:
-    f.write(f"=== FIX WORDPRESS SOURCES v6.0 ===\nStarted: {datetime.now()}\n\n")
+    f.write(f"=== FIX WORDPRESS SOURCES v7.0 ===\n")
 
-print("=== FIX WORDPRESS SOURCES v6.0 (Validate + Add Official URLs) ===\n")
-print(f"📝 Logs: {log_file}\n")
+print("=== FIX WORDPRESS SOURCES v7.0 (Smart Person-Specific URLs) ===\n")
 
 WP_USER = os.getenv("WP_USERNAME")
 WP_PASS = os.getenv("WP_APP_PASS")
 WP_BASE_URL = "https://politiciannetworth.com/wp-json"
 WP_TIMEOUT = 30
 
-OFFICIAL_SOURCES = {
-    "opensecrets.org": ["https://www.opensecrets.org/", "https://www.opensecrets.org/personal-finances/"],
-    "ballotpedia.org": ["https://ballotpedia.org/"],
-    "forbes.com": ["https://www.forbes.com/"],
-    "senate.gov": ["https://www.senate.gov/"],
-    "house.gov": ["https://www.house.gov/"],
+BIOGUIDE_MAP = {
+    "Joe Biden": ("Joe", "Biden", "B000444"),
+    "Kamala Harris": ("Kamala D.", "Harris", "H001075"),
+    "Nancy Pelosi": ("Nancy", "Pelosi", "P000197"),
+    "Bernie Sanders": ("Bernard", "Sanders", "S000033"),
+    "Alexandria Ocasio-Cortez": ("Alexandria", "Ocasio-Cortez", "O000172"),
+    "Ron DeSantis": ("Ron", "DeSantis", "D000621"),
+    "Nikki Haley": ("Nikki", "Haley", "H001066"),
+    "Marco Rubio": ("Marco", "Rubio", "R000595"),
+    "Tulsi Gabbard": ("Tulsi", "Gabbard", "G000571"),
+    "Liz Cheney": ("Liz", "Cheney", "C001109"),
+    "Ted Cruz": ("Ted", "Cruz", "C001098"),
+    "Rand Paul": ("Rand", "Paul", "P000603"),
+    "Mitt Romney": ("Mitt", "Romney", "R000615"),
+    "Adam Schiff": ("Adam B.", "Schiff", "S001150"),
+    "Amy Klobuchar": ("Amy", "Klobuchar", "K000367"),
+    "Elizabeth Warren": ("Elizabeth", "Warren", "W000817"),
+    "Mitch McConnell": ("Mitch", "McConnell", "M000355"),
+    "Chuck Schumer": ("Charles E.", "Schumer", "S000148"),
+    "Lindsey Graham": ("Lindsey", "Graham", "G000359"),
+    "Rich McCormick": ("Rich", "McCormick", "M000223"),
+    "Mark Green": ("Mark", "Green", "G000576"),
+    "Josh Hawley": ("Josh", "Hawley", "H001089"),
+    "Darrell Issa": ("Darrell Eugene", "Issa", "I000056"),
+    "Ron Wyden": ("Ronald Lee", "Wyden", "W000779"),
 }
 
-BLOCKED_PATTERNS = ["vertexaisearch", "googleapis.com", "google.com", "youtube.com", "twitter.com", "x.com/", "facebook.com", "instagram.com", "tiktok.com", "reddit.com", "wikipedia.org"]
+stats = {"total_posts": 0, "posts_updated": 0, "urls_tested": 0, "urls_valid": 0}
 
-stats = {"total_posts": 0, "posts_with_sources": 0, "posts_updated": 0, "sources_removed": 0, "sources_added": 0}
+def extract_name_from_title(title):
+    title = re.sub(r'\s+Net Worth\s+\d{4}:.*', '', title, flags=re.IGNORECASE)
+    return title.strip()
 
-def is_official_source(url):
+def build_forbes_url(name):
+    slug = name.lower().replace(" ", "-")
+    return f"https://www.forbes.com/profile/{slug}/"
+
+def build_opensecrets_url(name):
+    encoded = urllib.parse.quote(name)
+    return f"https://www.opensecrets.org/search?q={encoded}"
+
+def build_ballotpedia_url(name):
+    slug = name.replace(" ", "_")
+    return f"https://ballotpedia.org/{slug}"
+
+def build_quiverquant_url(name):
+    if name not in BIOGUIDE_MAP:
+        return None
+    first_name, last_name, bioguide_id = BIOGUIDE_MAP[name]
+    if not bioguide_id:
+        return None
+    full_name = f"{first_name} {last_name}"
+    encoded_name = urllib.parse.quote(full_name)
+    return f"https://www.quiverquant.com/congresstrading/politician/{encoded_name}-{bioguide_id}/"
+
+def is_url_working(url, timeout=10):
     if not url:
-        return False
-    url_lower = url.lower()
-    for blocked in BLOCKED_PATTERNS:
-        if blocked in url_lower:
-            return False
-    for official in OFFICIAL_SOURCES.keys():
-        if official in url_lower:
-            return True
-    return False
-
-def is_url_really_working(url, timeout=10):
-    if not url or not isinstance(url, str):
-        return False
-    if not is_official_source(url):
         return False
     try:
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         r = requests.get(url, timeout=timeout, headers=headers, allow_redirects=True)
         if r.status_code >= 400:
+            print(f"        HTTP {r.status_code}", end=" ")
             return False
         content = r.text.lower()
-        if any(err in content for err in ["404", "not found", "page not found", "doesn't exist"]):
+        if any(err in content for err in ["404", "not found", "error 500", "server error"]):
+            print(f"        Error page", end=" ")
             return False
         if len(r.text) < 1000:
+            print(f"        Too small", end=" ")
             return False
+        stats["urls_valid"] += 1
+        print(f"        ✅", end=" ")
         return True
     except:
+        print(f"        Error", end=" ")
         return False
 
-def get_working_official_urls():
-    working = []
-    print("  🔍 Finding working official sources...")
-    for domain, urls in OFFICIAL_SOURCES.items():
-        for url in urls:
-            print(f"      Testing {domain}...", end=" ")
-            if is_url_really_working(url, timeout=5):
-                print(f"✅")
-                working.append(url)
-                break
-            else:
-                print(f"❌")
-    return working
-
-def fix_sources_field(sources_text, name=""):
-    print(f"  🔗 Processing sources...")
-    lines = sources_text.split("\n") if sources_text else []
-    valid_lines = []
-    for line in lines:
-        url = line.strip()
-        if not url:
-            continue
-        print(f"      Checking: {url[:60]}", end=" ")
-        if is_url_really_working(url, timeout=8):
-            print(f"✅")
-            valid_lines.append(url)
+def build_sources_for_person(name):
+    print(f"  🔗 Building sources for: {name}")
+    sources = []
+    
+    url = build_forbes_url(name)
+    print(f"      Forbes: {url[:60]}", end=" ")
+    stats["urls_tested"] += 1
+    if is_url_working(url, timeout=8):
+        sources.append(url)
+        print()
+    else:
+        print()
+    
+    url = build_opensecrets_url(name)
+    print(f"      OpenSecrets: {url[:60]}", end=" ")
+    stats["urls_tested"] += 1
+    if is_url_working(url, timeout=8):
+        sources.append(url)
+        print()
+    else:
+        print()
+    
+    url = build_ballotpedia_url(name)
+    print(f"      Ballotpedia: {url[:60]}", end=" ")
+    stats["urls_tested"] += 1
+    if is_url_working(url, timeout=8):
+        sources.append(url)
+        print()
+    else:
+        print()
+    
+    url = build_quiverquant_url(name)
+    if url:
+        print(f"      QuiverQuant: {url[:60]}", end=" ")
+        stats["urls_tested"] += 1
+        if is_url_working(url, timeout=8):
+            sources.append(url)
+            print()
         else:
-            print(f"❌ Removed")
-            stats["sources_removed"] += 1
+            print()
+    else:
+        print(f"      QuiverQuant: (not congress member - skipped)")
     
-    if len(valid_lines) < 3:
-        print(f"  ➕ Adding official sources (have {len(valid_lines)}, need 3+)...")
-        working_urls = get_working_official_urls()
-        for url in working_urls:
-            if url not in valid_lines:
-                valid_lines.append(url)
-                print(f"      Added: {url}")
-                stats["sources_added"] += 1
-            if len(valid_lines) >= 4:
+    print(f"  Result: {len(sources)} working sources")
+    return sources
+
+def update_html_references(html_content, sources):
+    if not sources or "references-section" not in html_content:
+        return html_content
+    
+    label_map = {
+        "forbes.com": "Forbes – Wealth Estimate",
+        "opensecrets.org": "OpenSecrets – Personal Finances",
+        "ballotpedia.org": "Ballotpedia – Political Biography",
+        "quiverquant.com": "Quiver Quantitative – Congress Trading",
+    }
+    
+    new_items = []
+    for url in sources:
+        label = None
+        for domain, lbl in label_map.items():
+            if domain in url:
+                label = lbl
                 break
+        if not label:
+            label = url.split("/")[2]
+        new_items.append(f'<li><a href="{url}" target="_blank" rel="nofollow noopener">{label}</a></li>')
     
-    result = "\n".join(valid_lines[:4])
-    changed = (result != sources_text)
-    print(f"  Result: {len(valid_lines)} sources")
-    return result, changed
+    new_list = "\n".join(new_items)
+    ref_pattern = r'(<ul>)(.*?)(</ul>)'
+    match = re.search(ref_pattern, html_content, re.DOTALL | re.IGNORECASE)
+    
+    if match:
+        return html_content[:match.start(2)] + new_list + html_content[match.end(2):]
+    return html_content
 
 def get_all_posts(page=1):
     try:
@@ -135,19 +198,38 @@ def process_post(post_data):
     if isinstance(title, dict):
         title = title.get("rendered", "Unknown")
     acf = post_data.get("acf", {})
-    sources = acf.get("sources", "")
+    content = post_data.get("content", {})
+    html_content = content.get("raw", "") if isinstance(content, dict) else content
+    
     stats["total_posts"] += 1
-    print(f"\n📄 {post_id} - {title[:50]}")
-    stats["posts_with_sources"] += 1
-    cleaned, changed = fix_sources_field(sources, name=title)
-    if cleaned or changed:
-        print(f"  📤 Updating sources...")
-        if update_post(post_id, {"acf": {"sources": cleaned}}):
-            stats["posts_updated"] += 1
-            print(f"  ✅ UPDATED")
+    print(f"\n📄 {post_id} - {title[:60]}")
+    
+    name = extract_name_from_title(title)
+    print(f"  👤 Person: {name}")
+    
+    sources = build_sources_for_person(name)
+    
+    if not sources:
+        print(f"  ❌ No working sources found")
+        return
+    
+    print(f"  📤 Updating...")
+    
+    acf_sources = "\n".join(sources)
+    if update_post(post_id, {"acf": {"sources": acf_sources}}):
+        print(f"    ✅ ACF Updated")
+    
+    if html_content and "references-section" in html_content:
+        new_html = update_html_references(html_content, sources)
+        if new_html != html_content:
+            if update_post(post_id, {"content": new_html}):
+                print(f"    ✅ HTML References Updated")
+    
+    stats["posts_updated"] += 1
+    print(f"  ✅ POST UPDATED")
 
 def main():
-    print(f"🔍 Scanning posts (v6.0 - Validate & Add Sources)...\n")
+    print(f"🔍 Scanning posts (v7.0)...\n")
     total_pages = 1
     page = 1
     while page <= total_pages:
@@ -163,11 +245,10 @@ def main():
         page += 1
     
     print(f"\n\n{'='*70}")
-    print(f"✅ RESULTS (v6.0):")
+    print(f"✅ RESULTS (v7.0):")
     print(f"{'='*70}")
-    print(f"📊 Posts scanned: {stats['total_posts']}")
-    print(f"❌ Broken removed: {stats['sources_removed']}")
-    print(f"➕ Official added: {stats['sources_added']}")
+    print(f"📊 Posts: {stats['total_posts']}")
+    print(f"✅ URLs valid: {stats['urls_valid']}/{stats['urls_tested']}")
     print(f"🔧 Posts updated: {stats['posts_updated']}")
     print(f"{'='*70}")
 
