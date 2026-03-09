@@ -3,7 +3,18 @@ import os, requests, json, re, time, sys, urllib.parse, random
 from datetime import datetime, timezone, timedelta
 
 sys.stdout.reconfigure(line_buffering=True)
-print("--- BOTAS v4.0 (URL VALIDATION + SMART SCHEDULING) STARTUOJA ---")
+print("--- BOTAS v4.1 (URL VALIDATION + SMART SCHEDULING + PERSON_URLS) STARTUOJA ---")
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Load person_urls_master.py - USED FOR SOURCES!
+# ═══════════════════════════════════════════════════════════════════════════
+PERSON_URLS_MASTER = {}
+try:
+    from person_urls_master import PERSON_URLS
+    PERSON_URLS_MASTER = PERSON_URLS
+    print(f"✅ Loaded person_urls_master.py ({len(PERSON_URLS)} people)\n")
+except ImportError:
+    print("⚠️ person_urls_master.py not found - will use Gemini sources only\n")
 
 GEMINI_KEY  = os.getenv("GEMINI_API_KEY")
 WP_USER     = os.getenv("WP_USERNAME")
@@ -124,33 +135,27 @@ BLOCKED_URL_PATTERNS = [
 ]
 
 # ═════════════════════════════════════════════════════════════════════════════
-# URL VALIDATION - NEW v4.0
+# URL VALIDATION
 # ═════════════════════════════════════════════════════════════════════════════
 
 def test_url_alive(url, timeout=5):
-    """TEST if URL actually WORKS - return True/False"""
     if not url or not url.startswith("http"):
         return False
     try:
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         r = requests.get(url, timeout=timeout, headers=headers, allow_redirects=True)
-        
         if r.status_code >= 400:
             return False
-        
         content = r.text.lower()
         if any(err in content for err in ["404", "not found", "error 500", "page not found"]):
             return False
-        
         if len(r.text) < 500:
             return False
-        
         return True
     except:
         return False
 
 def is_valid_source_url(url):
-    """Check URL format"""
     url = url.strip()
     if not url or not url.startswith("http"):
         return False
@@ -633,6 +638,18 @@ def resolve_categories(cat_names):
     return list(cat_ids)
 
 
+def get_person_urls(name):
+    """Get VERIFIED sources from person_urls_master.py"""
+    if name not in PERSON_URLS_MASTER:
+        return []
+    
+    sources = PERSON_URLS_MASTER[name]
+    urls = [s["url"] for s in sources]
+    
+    print(f"      Using person_urls_master for {name}: {len(urls)} sources")
+    return urls
+
+
 def format_sources(urls, name=""):
     """Format sources with URL VALIDATION"""
     seen = set()
@@ -931,7 +948,19 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
         seo_desc = seo_desc[:150].rsplit(' ', 1)[0]
 
     faq_items = data.get("faq", [])
-    urls      = data.get("urls", [])
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    # GET SOURCES FROM person_urls_master.py FIRST!
+    # ═══════════════════════════════════════════════════════════════════════════
+    person_sources = get_person_urls(name)
+    
+    if person_sources:
+        urls = person_sources
+        print(f"    Using {len(urls)} sources from person_urls_master!")
+    else:
+        urls = data.get("urls", [])
+        print(f"    Using {len(urls)} sources from Gemini")
+    
     print(f"    URLs gauta: {len(urls)}, po filtro: {len([u for u in urls if is_valid_source_url(u)])}")
 
     article_html = data.get("article", "")
@@ -948,7 +977,7 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
     post_num     = stats["ok"] + stats["fail"] + stats["skip"] + 1
     
     # ═══════════════════════════════════════════════════════════════════════════
-    # SMART SCHEDULING v4.0 - 1st post 8h, then every 2h
+    # SMART SCHEDULING v4.1 - 1st post 8h, then every 2h
     # ═══════════════════════════════════════════════════════════════════════════
     if post_num == 1:
         delay_minutes = 480  # 8 hours
