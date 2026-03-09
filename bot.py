@@ -1,8 +1,9 @@
+#!/usr/bin/env python3
 import os, requests, json, re, time, sys, urllib.parse, random
 from datetime import datetime, timezone, timedelta
 
 sys.stdout.reconfigure(line_buffering=True)
-print("--- BOTAS STARTUOJA v3.0 ---")
+print("--- BOTAS v4.0 (URL VALIDATION + SMART SCHEDULING) STARTUOJA ---")
 
 GEMINI_KEY  = os.getenv("GEMINI_API_KEY")
 WP_USER     = os.getenv("WP_USERNAME")
@@ -13,7 +14,6 @@ WP_TIMEOUT  = 30
 IMG_TIMEOUT = 20
 GEMINI_TIMEOUT = 180
 
-# ✅ UPDATED: Pridėti 7 naujus žmones su jų Bioguide ID
 BIOGUIDE_MAP = {
     "Donald Trump": ("Donald J.", "Trump", ""),
     "Barack Obama": ("Barack", "Obama", ""),
@@ -54,7 +54,6 @@ BIOGUIDE_MAP = {
     "Mitch McConnell": ("Mitch", "McConnell", "M000355"),
     "Chuck Schumer": ("Charles E.", "Schumer", "S000148"),
     "Lindsey Graham": ("Lindsey", "Graham", "G000359"),
-    # ✅ 7 NAUJŲ ŽMONIŲ:
     "Rich McCormick": ("Rich", "McCormick", "M000223"),
     "Mark Green": ("Mark", "Green", "G000576"),
     "Josh Hawley": ("Josh", "Hawley", "H001089"),
@@ -70,37 +69,34 @@ WEALTH_OPTIONS = [
     "Corporate Board Seats", "Consulting Fees", "Hedge Fund Interests", "Cryptocurrency Assets",
 ]
 
-# ✅ UPDATED: Pridėti žinomi net worth skaičiai naujiems 7 žmonėms
 KNOWN_NET_WORTHS = {
-    "Donald Trump":           7300000000,
-    "Barack Obama":           70000000,
-    "Joe Biden":              10000000,
-    "Kamala Harris":          8000000,
-    "Hillary Clinton":        50000000,
-    "Bernie Sanders":         3000000,
-    "Nancy Pelosi":           260000000,
-    "Mike Bloomberg":         110000000000,
-    "Elon Musk":              300000000000,
-    "Ali Khamenei":           95000000000,
-    "Michelle Obama":         70000000,
-    "George W. Bush":         50000000,
-    "Bill Clinton":           120000000,
-    "Nikki Haley":            8000000,
-    "Ron DeSantis":           2000000,
-    "Gavin Newsom":           20000000,
-    "Marco Rubio":            2000000,
-    "Ted Cruz":               4000000,
-    "Mitt Romney":            300000000,
+    "Donald Trump": 7300000000,
+    "Barack Obama": 70000000,
+    "Joe Biden": 10000000,
+    "Kamala Harris": 8000000,
+    "Hillary Clinton": 50000000,
+    "Bernie Sanders": 3000000,
+    "Nancy Pelosi": 260000000,
+    "Mike Bloomberg": 110000000000,
+    "Elon Musk": 300000000000,
+    "Michelle Obama": 70000000,
+    "George W. Bush": 50000000,
+    "Bill Clinton": 120000000,
+    "Nikki Haley": 8000000,
+    "Ron DeSantis": 2000000,
+    "Gavin Newsom": 20000000,
+    "Marco Rubio": 2000000,
+    "Ted Cruz": 4000000,
+    "Mitt Romney": 300000000,
     "Alexandria Ocasio-Cortez": 200000,
-    "Pete Buttigieg":         1500000,
-    # ✅ NAUJŲ 7 ŽMONIŲ NET WORTH:
-    "Rich McCormick":         2000000,        # ~$2M
-    "Mark Green":             4000000,        # ~$4M
-    "Josh Hawley":            1500000,        # ~$1.5M
-    "Darrell Issa":           250000000,      # ~$250M
-    "Ron Wyden":              2000000,        # ~$2M
-    "Ronald Reagan":          13000000,       # ~$13M
-    "Abraham Lincoln":        100000,         # ~$100K (historical estimate)
+    "Pete Buttigieg": 1500000,
+    "Rich McCormick": 2000000,
+    "Mark Green": 4000000,
+    "Josh Hawley": 1500000,
+    "Darrell Issa": 250000000,
+    "Ron Wyden": 2000000,
+    "Ronald Reagan": 13000000,
+    "Abraham Lincoln": 100000,
 }
 
 CAT_MAP = {
@@ -120,6 +116,48 @@ PARENT_CAT = {
 
 stats = {"ok": 0, "fail": 0, "skip": 0}
 
+BLOCKED_URL_PATTERNS = [
+    "vertexaisearch", "googleapis.com", "google.com/search",
+    "gstatic.com", "googleusercontent.com", "youtube.com/watch",
+    "twitter.com", "x.com/", "facebook.com", "instagram.com", "tiktok.com",
+    "reddit.com", "wikipedia.org",
+]
+
+# ═════════════════════════════════════════════════════════════════════════════
+# URL VALIDATION - NEW v4.0
+# ═════════════════════════════════════════════════════════════════════════════
+
+def test_url_alive(url, timeout=5):
+    """TEST if URL actually WORKS - return True/False"""
+    if not url or not url.startswith("http"):
+        return False
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        r = requests.get(url, timeout=timeout, headers=headers, allow_redirects=True)
+        
+        if r.status_code >= 400:
+            return False
+        
+        content = r.text.lower()
+        if any(err in content for err in ["404", "not found", "error 500", "page not found"]):
+            return False
+        
+        if len(r.text) < 500:
+            return False
+        
+        return True
+    except:
+        return False
+
+def is_valid_source_url(url):
+    """Check URL format"""
+    url = url.strip()
+    if not url or not url.startswith("http"):
+        return False
+    for blocked in BLOCKED_URL_PATTERNS:
+        if blocked in url:
+            return False
+    return True
 
 # ─── GEMINI ──────────────────────────────────────────────────────────────────
 
@@ -192,7 +230,6 @@ def call_gemini(prompt, gemini_url, retries=4):
 # ─── JSON PARSING ─────────────────────────────────────────────────────────────
 
 def fix_json_control_chars(text):
-    """Pakeičia realius control simbolius į escape sequences string reikšmėse"""
     result = []
     in_string = False
     escape_next = False
@@ -218,11 +255,6 @@ def fix_json_control_chars(text):
 
 
 def fix_html_quotes_in_json(text):
-    """
-    Pakeičia HTML atributų double quotes į single quotes JSON stringo viduje.
-    Pvz: <a href="url"> -> <a href='url'>
-    Naudoja state machine kad teisingai atpažintų JSON string ribas.
-    """
     result = []
     i = 0
     in_json_string = False
@@ -278,7 +310,6 @@ def fix_html_quotes_in_json(text):
 
 
 def extract_fields_by_regex(text):
-    """Paskutinis fallback - ištraukia laukus regex kai JSON neparse"""
     data = {}
     art = re.search(r'"article"\s*:\s*"(.*?)(?=",\s*"(?:net_worth|job_title))', text, re.DOTALL)
     if art: data["article"] = art.group(1).replace('\\"', '"')
@@ -376,7 +407,6 @@ def parse_json(text):
 
 
 def extract_text_from_gemini(res):
-    """Ištraukia JSON tekstą ir grounding URLs iš Gemini atsakymo"""
     if not res or "candidates" not in res:
         return None, None, "no candidates"
     try:
@@ -401,11 +431,6 @@ def extract_text_from_gemini(res):
         wsq = gm.get("webSearchQueries", [])
         if wsq: print(f"    webSearchQueries: {wsq[:3]}")
 
-        supports = gm.get("groundingSupports", [])
-        if supports:
-            print(f"    groundingSupports[0] keys: {list(supports[0].keys()) if supports else []}")
-            print(f"    groundingSupports[0]: {str(supports[0])[:200]}")
-
         json_text = None
         for part in reversed(text_parts):
             if part.startswith("{"):
@@ -427,7 +452,6 @@ def extract_text_from_gemini(res):
 
 
 def validate_net_worth(name, net_worth_int):
-    """Tikrina ar net_worth realistiškas. Jei per toli nuo žinomo – override."""
     known = KNOWN_NET_WORTHS.get(name)
     if not known or net_worth_int <= 0:
         return net_worth_int
@@ -439,7 +463,6 @@ def validate_net_worth(name, net_worth_int):
 
 
 def check_required_fields(data):
-    """Tikrina ar visi būtini laukai užpildyti. Grąžina trūkstamų sąrašą."""
     missing = []
     article = data.get("article", "")
     if not article or len(article) < 800:
@@ -582,7 +605,6 @@ def clean_history(raw):
 
 
 def fix_history_last(history, net_worth_int):
-    """Paskutinė history reikšmė VISADA = net_worth"""
     if not history or net_worth_int <= 0:
         return history
     parts = history.split(",")
@@ -611,26 +633,15 @@ def resolve_categories(cat_names):
     return list(cat_ids)
 
 
-BLOCKED_URL_PATTERNS = [
-    "vertexaisearch", "googleapis.com", "google.com/search",
-    "gstatic.com", "googleusercontent.com", "youtube.com/watch",
-    "twitter.com", "x.com/", "facebook.com", "instagram.com", "tiktok.com",
-    "reddit.com", "wikipedia.org",
-]
-
-def is_valid_source_url(url):
-    url = url.strip()
-    if not url or not url.startswith("http"):
-        return False
-    for blocked in BLOCKED_URL_PATTERNS:
-        if blocked in url:
-            return False
-    return True
-
 def format_sources(urls, name=""):
+    """Format sources with URL VALIDATION"""
     seen = set()
     final = []
     quiver_added = False
+    
+    print(f"      Testing {len(urls)} URLs...", end=" ")
+    tested = 0
+    
     for url in urls:
         url = url.strip()
         if "quiverquant.com" in url:
@@ -638,24 +649,42 @@ def format_sources(urls, name=""):
                 fn, ln, bio = BIOGUIDE_MAP[name]
                 if bio:
                     ne = urllib.parse.quote(f"{fn} {ln}")
-                    final.append(f"https://www.quiverquant.com/congresstrading/politician/{ne}-{bio}")
-                    quiver_added = True
+                    qurl = f"https://www.quiverquant.com/congresstrading/politician/{ne}-{bio}"
+                    if test_url_alive(qurl):
+                        final.append(qurl)
+                        quiver_added = True
+                        tested += 1
+                        print("✓", end="", flush=True)
+                    else:
+                        print("✗", end="", flush=True)
             continue
+        
         if is_valid_source_url(url) and url not in seen:
-            seen.add(url)
-            final.append(url)
+            if test_url_alive(url):
+                seen.add(url)
+                final.append(url)
+                tested += 1
+                print("✓", end="", flush=True)
+            else:
+                print("✗", end="", flush=True)
+        
         if len(final) >= 4:
             break
+    
     if not quiver_added and name in BIOGUIDE_MAP:
         fn, ln, bio = BIOGUIDE_MAP[name]
         if bio:
             ne = urllib.parse.quote(f"{fn} {ln}")
-            final.append(f"https://www.quiverquant.com/congresstrading/politician/{ne}-{bio}")
+            qurl = f"https://www.quiverquant.com/congresstrading/politician/{ne}-{bio}"
+            if test_url_alive(qurl):
+                final.append(qurl)
+                tested += 1
+    
+    print(f" {tested} working")
     return "\n".join(u for u in final if u)
 
 
 def build_toc_html(article_html):
-    """Generuoja Table of Contents iš H2 tagų su anchor ID"""
     import re as _re
     h2s = _re.findall(r'<h2[^>]*>(.*?)</h2>', article_html, _re.IGNORECASE | _re.DOTALL)
     if len(h2s) < 2:
@@ -708,6 +737,7 @@ def build_faq_html(faq_items):
 
 
 def build_references_html(urls):
+    """Build references HTML - with tested URLs"""
     month_year = datetime.now().strftime("%B %Y")
     label_map = {
         "opensecrets.org": "OpenSecrets – Personal Finances",
@@ -726,6 +756,8 @@ def build_references_html(urls):
     seen_domains = set()
     for url in urls:
         if not is_valid_source_url(url):
+            continue
+        if not test_url_alive(url):
             continue
         domain = re.sub(r"https?://(www\.)?", "", url).split("/")[0]
         if domain in seen_domains:
@@ -783,12 +815,11 @@ Create 5 H2 headings that are SPECIFIC to {name} — based on actual facts you f
 DO NOT use generic headings like "Income Streams Explained" or "The Number Behind X's Name".
 Each H2 must reference something REAL and SPECIFIC about {name}'s finances.
 
-Examples of GOOD specific H2s (these are just examples — create your own based on {name}'s actual story):
-- "How Mar-a-Lago Became Trump's Cash Machine" (specific property)
-- "The $65M Obama Book Deal That Changed Everything" (specific deal with amount)
-- "From $-1M Debt to $8M: Nikki Haley's Fastest Payday" (specific contrast)
-- "Why Sanders Owns 3 Houses on a Senator's Salary" (specific counterintuitive fact)
-- "The Setad Fund: Khamenei's $95B Shadow Empire" (specific organization)
+Examples of GOOD specific H2s:
+- "How Mar-a-Lago Became Trump's Cash Machine"
+- "The $65M Obama Book Deal That Changed Everything"
+- "From $-1M Debt to $8M: Nikki Haley's Fastest Payday"
+- "Why Sanders Owns 3 Houses on a Senator's Salary"
 
 Structure: opening hook → 5 unique H2 sections based on {name}'s real financial story""",
 
@@ -797,14 +828,7 @@ Structure: opening hook → 5 unique H2 sections based on {name}'s real financia
 Write 5 H2 headings that could ONLY apply to {name} — not to any other politician.
 Each heading must contain either: a specific dollar amount, a specific asset name, a specific year, or a specific surprising fact.
 
-Structure: opening hook → 5 unique H2 sections. Each section must feel like it belongs in a magazine profile of {name} specifically.""",
-
-        f"""ANGLE: {angle}
-
-Your H2 headings must be so specific that a reader instantly knows this article is about {name}.
-Use real names of properties, real dollar figures, real years, real events from {name}'s financial history.
-
-Structure: opening hook → 5 unique H2 sections that tell {name}'s specific financial story from search results.""",
+Structure: opening hook → 5 unique H2 sections.""",
     ]
     structure = random.choice(structures)
 
@@ -813,49 +837,38 @@ Structure: opening hook → 5 unique H2 sections that tell {name}'s specific fin
     return f"""You are a financial reporter writing for a general audience. Write a unique, well-researched profile of {name}'s finances.
 
 CRITICAL — NET WORTH ACCURACY:
-1. Search RIGHT NOW: "{name} net worth 2026" + "{name} net worth site:forbes.com OR site:bloomberg.com OR site:celebritynetworth.com"
-2. Use the figure that appears MOST OFTEN across credible sources. Do not invent or average.
-3. Use the MOST COMMONLY REPORTED net worth figure — even if it includes controlled assets:
-   - Ali Khamenei: most sources cite ~$95 billion (Setad empire) → net_worth = 95000000000
-   - Donald Trump: Forbes 2025 cites ~$7.3B → net_worth = 7300000000
-   - Kamala Harris: OpenSecrets/Forbes cite ~$8M → net_worth = 8000000
-   - Barack Obama: Celebrity Net Worth cites ~$70M → net_worth = 70000000
-4. NEVER invent a figure. If sources conflict, use the LOWER credible estimate.
-5. "history" must use REAL verified figures for each year — not a trend line you made up.
-   - Search: "{name} net worth [year]" for multiple years if needed
-   - Show real declines if they happened
-   - Last entry MUST equal net_worth exactly
+1. Search RIGHT NOW: "{name} net worth 2026"
+2. Use the MOST COMMONLY REPORTED net worth figure
+3. NEVER invent a figure
+4. "history" must use REAL verified figures for each year
+5. Last entry MUST equal net_worth exactly
 
 WRITING RULES:
 - Article MUST be 1050-1250 words
 - Article MUST have minimum 5 H2 sections
-- ONLY verified real facts — no invented numbers
-- Use specific numbers: "$47,000 Senate salary" not "congressional salary"
-- Include 2+ facts most people genuinely don't know about this person's finances
-- Write like a smart friend explaining — not a textbook, not Wikipedia
-- Short punchy sentences mixed with longer ones. Vary the rhythm.
-- Be specific: "a $2.1M condo in Georgetown" beats "Washington D.C. property"
+- ONLY verified real facts
+- Use specific numbers: "$47,000 Senate salary"
+- Include 2+ facts most people don't know about this person's finances
+- Write like a smart friend explaining — not a textbook
+- Short punchy sentences mixed with longer ones
 
-BANNED WORDS AND PHRASES — never use these:
+BANNED WORDS:
 "it's worth noting", "delve into", "in conclusion", "moreover", "furthermore",
 "navigating", "landscape", "testament to", "shed light on", "pivotal role",
 "net worth journey", "financial journey", "in the world of", "underscores",
-"showcases", "lucrative", "multifaceted", "demonstrates", "significant",
-"notably", "it is important to note", "interestingly", "this allowed him/her to",
-"leveraged", "garnered", "accumulated wealth", "amassed", "robust portfolio"
+"showcases", "lucrative", "multifaceted", "demonstrates", "significant"
 
 ARTICLE STRUCTURE:
 {structure}
 
 TONE:
-- Opening: grab attention immediately — a surprising number, a contrast, a little-known fact. Never start with "born in..."
-- Mix data with story — numbers need context and human interest
-- Avoid corporate/AI-sounding language. Write the way a journalist would actually talk.
+- Opening: grab attention immediately — a surprising number, a contrast, a little-known fact
+- Mix data with story
+- Avoid corporate/AI-sounding language
 
-FAQ RULES — ALL 4 ARE REQUIRED, no exceptions:
+FAQ RULES — ALL 4 ARE REQUIRED:
 - Each answer must be 2-3 sentences with specific figures
 - Questions should be what real people actually Google
-- Answers must directly answer the question — no filler
 
 RETURN THIS EXACT JSON STRUCTURE — every field required:
 {{
@@ -867,7 +880,7 @@ RETURN THIS EXACT JSON STRUCTURE — every field required:
   "assets": "One vivid specific sentence naming actual holdings with dollar values",
   "cats": ["Most Searched Politicians", "one category from list"],
   "urls": ["https://forbes.com/...", "https://opensecrets.org/...", "https://example.com/..."],
-  "seo_title": "REQUIRED: Must follow this exact format — '{name} Net Worth 2026: [unique hook]'. The hook must reference a specific fact, contrast or surprising figure you found. Examples of good hooks: 'From Debt to $8M', 'Middle-Class Joe\\'s $10M Secret', 'From Public Service to a $70M+ Empire', 'The $7B Truth Nobody Talks About'. MAX 65 chars total. NO generic phrases like \\'Financial Journey\\' or \\'Wealth Explained\\'.",
+  "seo_title": "REQUIRED: Must follow this exact format — '{name} Net Worth 2026: [unique hook]'. MAX 65 chars total.",
   "seo_desc": "130-150 char description — must include the net worth figure and one surprising fact",
   "faq": [
     {{"question": "What is {name}'s net worth in 2026?", "answer": "2-3 sentences. Specific figure with source and context."}},
@@ -877,24 +890,22 @@ RETURN THIS EXACT JSON STRUCTURE — every field required:
   ]
 }}
 
-CATEGORIES to choose from: {cats_list}
-WEALTH SOURCES to choose from (pick 2-4 that genuinely apply): {wealth_list}
+CATEGORIES: {cats_list}
+WEALTH SOURCES (pick 2-4): {wealth_list}
 SEO DESC ANGLE: {seo_angle}
 
-URLS RULES — CRITICAL:
-- "urls" must contain 3-4 REAL, WORKING URLs from credible sources you actually used
-- Use: forbes.com, bloomberg.com, opensecrets.org, ballotpedia.org, reuters.com, apnews.com, cnbc.com, businessinsider.com, thestreet.com, washingtonpost.com, nytimes.com, politico.com
-- DO NOT use vertexaisearch, google.com, youtube.com, twitter.com, facebook.com, instagram.com, wikipedia.org
-- If you cannot find exact article URLs, use the homepage of the source (e.g. "https://www.forbes.com/profile/donald-trump/")
-- NEVER leave urls as ["https://...", ...] — always put real URLs
+URLS RULES:
+- Must contain 3-4 REAL, WORKING URLs from credible sources
+- Use: forbes.com, bloomberg.com, opensecrets.org, ballotpedia.org, reuters.com, apnews.com, cnbc.com, businessinsider.com
+- NEVER use vertexaisearch, google.com, youtube.com, twitter.com, facebook.com, wikipedia.org
 
-⚠️ OUTPUT RULES — CRITICAL:
-1. Start your response with {{ — nothing before it
+⚠️ OUTPUT RULES:
+1. Start with {{ — nothing before it
 2. End with }} — nothing after it
-3. No markdown, no ```json, no explanations
-4. net_worth must be a plain integer (no quotes, no $ sign)
-5. All 11 fields are REQUIRED — missing any = failure. FAQ must have exactly 4 items.
-6. In the "article" field: NO HTML links or anchor tags. Use only: <p>, <h2>, <h3>, <strong>, <em>, <ul>, <li>. Links break the JSON parser."""
+3. No markdown, no ```json
+4. net_worth must be a plain integer
+5. All 11 fields are REQUIRED
+6. FAQ must have exactly 4 items"""
 
 
 # ─── WORDPRESS ───────────────────────────────────────────────────────────────
@@ -935,8 +946,17 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
     )
 
     post_num     = stats["ok"] + stats["fail"] + stats["skip"] + 1
-    schedule_str = (datetime.now(timezone.utc) + timedelta(minutes=124 * post_num)).strftime("%Y-%m-%dT%H:%M:%S")
-    print(f"    Suplanuota: {schedule_str}")
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    # SMART SCHEDULING v4.0 - 1st post 8h, then every 2h
+    # ═══════════════════════════════════════════════════════════════════════════
+    if post_num == 1:
+        delay_minutes = 480  # 8 hours
+    else:
+        delay_minutes = 480 + ((post_num - 1) * 120)  # 8h + (N-1)*2h
+    
+    schedule_str = (datetime.now(timezone.utc) + timedelta(minutes=delay_minutes)).strftime("%Y-%m-%dT%H:%M:%S")
+    print(f"    Suplanuota: {schedule_str} (delay: {delay_minutes//60}h {delay_minutes%60}m)")
 
     payload = {
         "title":          data.get("seo_title", f"{name} Net Worth 2026")[:70],
