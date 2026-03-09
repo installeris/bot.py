@@ -12,7 +12,14 @@ from datetime import datetime
 from urllib.parse import urlparse
 
 sys.stdout.reconfigure(line_buffering=True)
+
+# Setup logging
+log_file = f"fix_sources_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+with open(log_file, "w") as f:
+    f.write(f"=== FIX WORDPRESS SOURCES v2.0 ===\nStarted: {datetime.now()}\n\n")
+
 print("=== FIX WORDPRESS SOURCES v2.0 (QuiverQuant Support) ===\n")
+print(f"📝 Logs saved to: {log_file}\n")
 
 WP_USER = os.getenv("WP_USERNAME")
 WP_PASS = os.getenv("WP_APP_PASS")
@@ -77,6 +84,18 @@ stats = {
     "urls_fixed": 0,
     "posts_updated": 0,
 }
+
+
+def log_msg(msg, level="INFO"):
+    """Log į console ir failą"""
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    log_line = f"[{timestamp}] {msg}"
+    print(log_line)
+    try:
+        with open(log_file, "a") as f:
+            f.write(log_line + "\n")
+    except:
+        pass
 
 # ✅ KREDIBILŪS ŠALTINIAI - jei broken, naudojame šituos
 TRUSTED_SOURCES = {
@@ -158,7 +177,89 @@ def validate_quiver_url(url):
         return False
 
 
-def is_valid_url(url):
+def extract_urls_from_html(html_content):
+    """Ištraukia visus URLs iš HTML (references section)"""
+    if not html_content:
+        return []
+    
+    # Randi visus <a href="..."> links
+    pattern = r'href=["\']([^"\']+)["\']'
+    urls = re.findall(pattern, html_content)
+    return urls
+
+
+def fix_html_references(html_content, name=""):
+    """
+    Fiksuoja broken URLs HTML content'e
+    - Randą References/Sources sekcijų
+    - Fiksuoja broken links
+    - Grąžina updated HTML
+    """
+    if not html_content:
+        return html_content, False
+    
+    changed = False
+    
+    # Randi references-section (<hr> iki pabaigos)
+    ref_pattern = r'(<hr[^>]*>.*?<div class="references-section">.*?)(</div>)'
+    ref_match = re.search(ref_pattern, html_content, re.DOTALL | re.IGNORECASE)
+    
+    if not ref_match:
+        return html_content, False
+    
+    ref_section = ref_match.group(1)
+    print(f"      Found references section")
+    
+    # Randi visus <li><a href="...">...</a></li> entries
+    link_pattern = r'<li>\s*<a\s+href=["\']([^"\']+)["\'][^>]*>([^<]+)</a>\s*</li>'
+    links = re.findall(link_pattern, ref_section)
+    
+    print(f"      References links: {len(links)}")
+    
+    for i, (url, label) in enumerate(links, 1):
+        print(f"      [Ref {i}] {url[:60]}...", end=" ")
+        
+        if not is_valid_url(url):
+            print(f"❌ Invalid")
+            continue
+        
+        if check_url_accessible(url, timeout=5):
+            print(f"✅ OK")
+        else:
+            print(f"❌ BROKEN")
+            changed = True
+            
+            # Pabandyt gauti alternative
+            alt = get_alternative_url(url, name)
+            if alt:
+                # Replace URL in HTML
+                old_link = f'<a href="{url}"'
+                new_link = f'<a href="{alt}"'
+                html_content = html_content.replace(old_link, new_link)
+                print(f"        → Fixed to: {alt[:50]}")
+            else:
+                print(f"        → No alternative")
+    
+    return html_content, changed
+
+
+def fix_html_content(post_id, html_content, name=""):
+    """Fiksuoja broken URLs HTML content'e ir updatena WordPress"""
+    if not html_content:
+        return False
+    
+    fixed_html, changed = fix_html_references(html_content, name=name)
+    
+    if not changed:
+        return False
+    
+    # Update WordPress content
+    print(f"  📤 Updating HTML content...")
+    update_payload = {
+        "content": fixed_html
+    }
+    
+    return update_post(post_id, update_payload)
     """Tikrina ar URL yra valid format"""
     if not url or not isinstance(url, str):
         return False
@@ -311,7 +412,7 @@ def get_all_posts(page=1):
             params={
                 "per_page": 100,
                 "page": page,
-                "status": ["publish", "future", "draft"],  # All statuses
+                "status": "publish,future,draft",  # Comma-separated string, not list!
                 "order": "desc",
                 "orderby": "modified",
             },
@@ -319,7 +420,8 @@ def get_all_posts(page=1):
             timeout=WP_TIMEOUT,
         )
         if res.status_code == 200:
-            return res.json(), res.headers.get("X-WP-TotalPages", 1)
+            total_pages = int(res.headers.get("X-WP-TotalPages", 1))
+            return res.json(), total_pages
         print(f"❌ API Error: {res.status_code}")
         return [], 1
     except Exception as e:
@@ -362,7 +464,7 @@ def update_post(post_id, payload):
 
 
 def process_post(post_data):
-    """Apdoroja vieną postą"""
+    """Apdoroja vieną postą - ACF sources + HTML references"""
     post_id = post_data.get("id")
     title = post_data.get("title", {})
     if isinstance(title, dict):
@@ -371,34 +473,40 @@ def process_post(post_data):
     acf = post_data.get("acf", {})
     sources = acf.get("sources", "")
     job_title = acf.get("job_title", "")
+    content = post_data.get("content", {})
+    if isinstance(content, dict):
+        html_content = content.get("raw", "")
+    else:
+        html_content = content
     
     stats["total_posts"] += 1
     
-    if not sources:
-        return False
-    
-    stats["with_sources"] += 1
-    
     print(f"\n📄 {post_id} - {title[:50]}")
     print(f"  👤 {job_title}")
-    print(f"  🔗 Sources ({len(sources.split(chr(10)))} lines)")
     
-    # Fix sources
-    fixed_sources, changed = fix_sources_field(sources, name=title, post_id=post_id)
+    acf_updated = False
+    html_updated = False
     
-    if not changed:
-        print(f"  ✅ All sources OK")
-        return False
+    # ═══ FIX ACF SOURCES ═══
+    if sources:
+        print(f"  🔗 ACF Sources ({len(sources.split(chr(10)))} lines)")
+        fixed_sources, changed = fix_sources_field(sources, name=title, post_id=post_id)
+        
+        if changed:
+            acf_updated = True
+            print(f"    📤 Updating ACF...")
+            update_payload = {"acf": {"sources": fixed_sources}}
+            update_post(post_id, update_payload)
+        else:
+            print(f"    ✅ All OK")
     
-    # Atnaujinti WordPress
-    print(f"  📤 Updating WordPress...")
-    update_payload = {
-        "acf": {
-            "sources": fixed_sources
-        }
-    }
+    # ═══ FIX HTML REFERENCES ═══
+    if html_content and "references-section" in html_content:
+        print(f"  📄 HTML References")
+        html_updated = fix_html_content(post_id, html_content, name=title)
     
-    if update_post(post_id, update_payload):
+    # Summary
+    if acf_updated or html_updated:
         stats["posts_updated"] += 1
         print(f"  ✅ UPDATED")
         return True
