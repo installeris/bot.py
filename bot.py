@@ -13,6 +13,7 @@ WP_TIMEOUT  = 30
 IMG_TIMEOUT = 20
 GEMINI_TIMEOUT = 180
 
+# ✅ UPDATED: Pridėti 7 naujus žmones su jų Bioguide ID
 BIOGUIDE_MAP = {
     "Donald Trump": ("Donald J.", "Trump", ""),
     "Barack Obama": ("Barack", "Obama", ""),
@@ -53,6 +54,14 @@ BIOGUIDE_MAP = {
     "Mitch McConnell": ("Mitch", "McConnell", "M000355"),
     "Chuck Schumer": ("Charles E.", "Schumer", "S000148"),
     "Lindsey Graham": ("Lindsey", "Graham", "G000359"),
+    # ✅ 7 NAUJŲ ŽMONIŲ:
+    "Rich McCormick": ("Rich", "McCormick", "M000223"),
+    "Mark Green": ("Mark", "Green", "G000576"),
+    "Josh Hawley": ("Josh", "Hawley", "H001089"),
+    "Darrell Issa": ("Darrell Eugene", "Issa", "I000056"),
+    "Ron Wyden": ("Ronald Lee", "Wyden", "W000779"),
+    "Ronald Reagan": ("Ronald Wilson", "Reagan", ""),
+    "Abraham Lincoln": ("Abraham", "Lincoln", ""),
 }
 
 WEALTH_OPTIONS = [
@@ -61,8 +70,7 @@ WEALTH_OPTIONS = [
     "Corporate Board Seats", "Consulting Fees", "Hedge Fund Interests", "Cryptocurrency Assets",
 ]
 
-# Žinomi net worth skaičiai iš patikimų šaltinių (Forbes/Bloomberg/CelebrityNetWorth)
-# Naudojami kaip validacija - jei Gemini grąžina >3x ar <0.3x šio skaičiaus, įspėjame
+# ✅ UPDATED: Pridėti žinomi net worth skaičiai naujiems 7 žmonėms
 KNOWN_NET_WORTHS = {
     "Donald Trump":           7300000000,
     "Barack Obama":           70000000,
@@ -85,6 +93,14 @@ KNOWN_NET_WORTHS = {
     "Mitt Romney":            300000000,
     "Alexandria Ocasio-Cortez": 200000,
     "Pete Buttigieg":         1500000,
+    # ✅ NAUJŲ 7 ŽMONIŲ NET WORTH:
+    "Rich McCormick":         2000000,        # ~$2M
+    "Mark Green":             4000000,        # ~$4M
+    "Josh Hawley":            1500000,        # ~$1.5M
+    "Darrell Issa":           250000000,      # ~$250M
+    "Ron Wyden":              2000000,        # ~$2M
+    "Ronald Reagan":          13000000,       # ~$13M
+    "Abraham Lincoln":        100000,         # ~$100K (historical estimate)
 }
 
 CAT_MAP = {
@@ -234,17 +250,14 @@ def fix_html_quotes_in_json(text):
                 i += 1
                 continue
             else:
-                # Ar esame HTML tago viduje?
                 recent = "".join(result[-300:])
                 last_lt = recent.rfind("<")
                 last_gt = recent.rfind(">")
                 in_html_tag = last_lt > last_gt
 
                 if in_html_tag:
-                    # HTML atributo kabutė - pakeičiame į single quote
                     result.append("'")
                     i += 1
-                    # Einame iki kitos closing " ir ją irgi pakeičiame
                     while i < len(text) and text[i] not in ('"', '>'):
                         result.append(text[i])
                         i += 1
@@ -253,7 +266,6 @@ def fix_html_quotes_in_json(text):
                         i += 1
                     continue
                 else:
-                    # Tikra JSON stringo pabaiga
                     in_json_string = False
                     result.append(ch)
                     i += 1
@@ -290,7 +302,6 @@ def extract_fields_by_regex(text):
     if urls_m:
         found = re.findall(r'"(https?://[^"\s]+)"', urls_m.group(1))
         data["urls"] = [u for u in found if is_valid_source_url(u)][:4]
-    # FAQ - traukiame visus question/answer porus
     faq_items = re.findall(
         r'\{\s*"question"\s*:\s*"([^"]+)"\s*,\s*"answer"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}',
         text, re.DOTALL
@@ -305,21 +316,17 @@ def extract_fields_by_regex(text):
 def parse_json(text):
     text = text.strip()
 
-    # DEBUG - išsaugome raw tekstą analizei
     try:
         with open("last_gemini_raw.txt", "w", encoding="utf-8") as dbf:
             dbf.write(text)
     except: pass
 
-    # 1. Fix control chars + tiesiogiai
     text_fixed = fix_json_control_chars(text)
     for t in [text_fixed, text]:
         try: return json.loads(t)
         except: pass
 
-    # 2. Ištraukiame article lauką ir pakeičiame vidines kabutes
-    # Gemini rašo: "The Art of the Deal" su kabutėmis article viduje - tai laužo JSON
-    tw = text_fixed  # default
+    tw = text_fixed
     m = re.search(r'\{"article"\s*:\s*"(.*?)",\s*"net_worth"', text_fixed, re.DOTALL)
     if m:
         art_clean = m.group(1).replace('"', "'")
@@ -330,14 +337,12 @@ def parse_json(text):
             snippet = tw[max(0, e.pos-30):e.pos+30]
             print(f"    Article fix klaida pos={e.pos}: {repr(snippet)}")
 
-    # 3. Nuo { iki paskutinio }
     s = tw.find("{")
     e = tw.rfind("}")
     if s != -1 and e != -1 and e > s:
         try: return json.loads(tw[s:e+1])
         except: pass
 
-    # 4. Nupjautas JSON - karpome nuo galo, grąžiname geriausią
     if s != -1:
         chunk = tw[s:]
         best = None
@@ -361,7 +366,6 @@ def parse_json(text):
             print(f"    JSON iš dalies atkurtas ({best_fields} laukai)")
             return best
 
-    # 5. Paskutinis fallback - regex
     print("    Bandome regex extraction...")
     result = extract_fields_by_regex(text)
     if result:
@@ -380,7 +384,6 @@ def extract_text_from_gemini(res):
         reason = cand.get("finishReason", "UNKNOWN")
         parts = cand.get("content", {}).get("parts", [])
 
-        # Imame tik text parts
         text_parts = [p.get("text", "").strip() for p in parts if "text" in p and p.get("text", "").strip()]
         full_text = "".join(text_parts)
         print(f"    {len(full_text)} simboliu, reason: {reason}, parts: {len(text_parts)}")
@@ -390,26 +393,19 @@ def extract_text_from_gemini(res):
         if not full_text:
             return None, None, "tuscias atsakymas"
 
-        # Ištraukiame grounding URLs iš metadata (realios Google Search nuorodos)
         grounding_urls = []
         gm = cand.get("groundingMetadata", {})
         all_chunks = gm.get("groundingChunks", [])
         print(f"    groundingChunks: {len(all_chunks)}")
 
-        # webSearchQueries - paieškos užklausos (ne URL, bet matyti kas ieškota)
         wsq = gm.get("webSearchQueries", [])
         if wsq: print(f"    webSearchQueries: {wsq[:3]}")
 
-        # groundingSupports - gali turėti tikrus URL
         supports = gm.get("groundingSupports", [])
         if supports:
             print(f"    groundingSupports[0] keys: {list(supports[0].keys()) if supports else []}")
             print(f"    groundingSupports[0]: {str(supports[0])[:200]}")
 
-        # Visi chunk URL yra vertexaisearch redirect - nerealūs, praleisti
-        # Vietoj to imsime iš Gemini JSON "urls" lauko arba generuosime iš webSearchQueries
-
-        # Su google_search Gemini gali grąžinti: [search_results_text, json_text]
         json_text = None
         for part in reversed(text_parts):
             if part.startswith("{"):
@@ -456,7 +452,6 @@ def check_required_fields(data):
         missing.append("history tuščia arba placeholder")
     if not str(data.get("job_title", "")).strip():
         missing.append("job_title tuščias")
-    # faq - jei mažiau nei 4, papildome
     faq = data.get("faq", [])
     name_val = data.get("job_title", "this politician")
     nw_val = data.get("net_worth", 0)
@@ -605,13 +600,13 @@ def make_slug(name):
 
 
 def resolve_categories(cat_names):
-    cat_ids = {27}  # Visada "Most Searched Politicians"
+    cat_ids = {27}
     for n in cat_names:
         if n in CAT_MAP:
             cid = CAT_MAP[n]; cat_ids.add(cid)
             p = PARENT_CAT.get(cid)
             if p: cat_ids.add(p)
-    if len(cat_ids) <= 1: cat_ids.add(19)  # Fallback: United States
+    if len(cat_ids) <= 1: cat_ids.add(19)
     cat_ids.discard(None)
     return list(cat_ids)
 
@@ -672,7 +667,6 @@ def build_toc_html(article_html):
         clean = _re.sub('<[^>]+>', '', h2_text).strip()
         anchor = f"toc-{i+1}-{_re.sub(r'[^a-z0-9]+', '-', clean.lower()).strip('-')[:40]}"
         toc_items.append(f'<li style="margin:0"><a href="#{anchor}" style="color:#2563eb;text-decoration:none">{clean}</a></li>')
-        # Pridedame id į H2 tagą
         new_html = new_html.replace(f'<h2>{h2_text}</h2>', f'<h2 id="{anchor}">{h2_text}</h2>', 1)
 
     toc = (
@@ -930,7 +924,6 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
     print(f"    URLs gauta: {len(urls)}, po filtro: {len([u for u in urls if is_valid_source_url(u)])}")
 
     article_html = data.get("article", "")
-    # Pašaliname literal \n tekstą (ne tikrus newlines) kuris kartais atsiranda Gemini atsakyme
     article_html = article_html.replace('\\n', ' ').replace('\\r', '').strip()
     article_with_ids, toc_html = build_toc_html(article_html)
 
@@ -970,7 +963,6 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
         }
     }
 
-    # Jei update - naudojame PATCH, jei naujas - POST
     for attempt in range(3):
         try:
             if post_id:
@@ -1007,10 +999,8 @@ def run_bot(name, gemini_url):
     num = stats["ok"] + stats["fail"] + stats["skip"] + 1
     print(f"\n{'='*55}\n[{num}] {name}\n{'='*55}")
 
-    # Tikriname ar postas jau egzistuoja
     exists, post_id, post_status = check_post_exists(name)
     if exists:
-        # Tikriname ar reikia update (tušti ACF laukai ar per trumpas straipsnis)
         needs_update = False
         try:
             pr = requests.get(f"{WP_BASE_URL}/wp/v2/posts/{post_id}?acf_format=standard",
@@ -1024,7 +1014,7 @@ def run_bot(name, gemini_url):
                 title = pdata.get("title", {}).get("rendered", "")
                 faq_present   = "pnw-faq-wrap" in art
                 toc_present   = "pnw-toc" in art
-                title_has_hook = ":" in title  # "Name Net Worth 2026: Hook"
+                title_has_hook = ":" in title
                 sources_ok    = src and "http" in src
 
                 missing_info = []
@@ -1048,13 +1038,11 @@ def run_bot(name, gemini_url):
         if not needs_update:
             stats["skip"] += 1; return
 
-    # Nuotrauka
     img_id, img_url_val = None, ""
     wiki_img = get_wiki_image(name)
     if wiki_img:
         img_id, img_url_val = upload_image_to_wp(name, wiki_img)
 
-    # Gemini – iki 3 bandymų kol gauti pilnus duomenis
     data = None
     for attempt in range(3):
         if attempt > 0:
@@ -1078,18 +1066,16 @@ def run_bot(name, gemini_url):
             print(f"    JSON parse klaida: {e}")
             continue
 
-        # Papildome URLs iš grounding metadata jei JSON urls tuščias/mažas
         if grounding_urls:
             existing = parsed.get("urls", [])
             merged = existing + [u for u in grounding_urls if u not in existing]
-            parsed["urls"] = merged[:6]  # max 6, format_sources sutrumpins iki 4
+            parsed["urls"] = merged[:6]
 
         missing = check_required_fields(parsed)
         if missing:
             print(f"    Trūksta laukų: {', '.join(missing)}")
             continue
 
-        # Visi laukai OK
         print(f"    ✓ Visi laukai užpildyti")
         data = parsed
         break
