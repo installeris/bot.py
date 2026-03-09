@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Fix WordPress Sources URLs v3.1
-- Validuoja ir fiksuoja sulaužytas nuorodas WordPress
-- Pereina PER VISUS posts (scheduled, published, draft)
-- Tikrina 'sources' ACF field IR HTML references
-- QuiverQuant regeneracija iš bioguide ID
+Fix WordPress Sources URLs v3.2
+- SMART validation: ne tik HTTP 200, bet ir CONTENT check!
+- Validuoja ar URL atidaro ir turi relevant informacijos
+- Nepridedam fake OpenSecrets search links
+- Tik trusted homepages jei broken
 """
 
 import os, requests, json, re, time, sys, urllib.parse
@@ -16,9 +16,9 @@ sys.stdout.reconfigure(line_buffering=True)
 # Setup logging
 log_file = f"fix_sources_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 with open(log_file, "w") as f:
-    f.write(f"=== FIX WORDPRESS SOURCES v3.1 ===\nStarted: {datetime.now()}\n\n")
+    f.write(f"=== FIX WORDPRESS SOURCES v3.2 (Smart Validation) ===\nStarted: {datetime.now()}\n\n")
 
-print("=== FIX WORDPRESS SOURCES v3.1 (Full HTML + QuiverQuant) ===\n")
+print("=== FIX WORDPRESS SOURCES v3.2 (Smart Content Validation) ===\n")
 print(f"📝 Logs saved to: {log_file}\n")
 
 # ═════════════════════════════════════════════════════════════
@@ -79,6 +79,7 @@ BIOGUIDE_MAP = {
     "Abraham Lincoln": ("Abraham", "Lincoln", ""),
 }
 
+# ⚠️ ONLY REAL PAGES - NO SEARCH!
 TRUSTED_SOURCES = {
     "opensecrets.org": "https://www.opensecrets.org/",
     "ballotpedia.org": "https://ballotpedia.org/",
@@ -96,8 +97,8 @@ TRUSTED_SOURCES = {
 }
 
 BLOCKED_PATTERNS = [
-    "vertexaisearch", "googleapis.com", "google.com/search",
-    "youtube.com/watch", "twitter.com", "x.com/",
+    "vertexaisearch", "googleapis.com", "google.com",
+    "youtube.com", "twitter.com", "x.com/",
     "facebook.com", "instagram.com", "tiktok.com", "reddit.com", "wikipedia.org",
 ]
 
@@ -106,14 +107,16 @@ stats = {
     "posts_with_acf": 0,
     "posts_with_html": 0,
     "posts_updated": 0,
+    "urls_broken": 0,
+    "urls_fixed": 0,
 }
 
 # ═════════════════════════════════════════════════════════════
-# HELPERS - PRIEŠ VISOS KITOS FUNKCIJOS!
+# SMART VALIDATION - CONTENT CHECK!
 # ═════════════════════════════════════════════════════════════
 
 def is_valid_url(url):
-    """Tikrina ar URL yra valid format"""
+    """Tikrina URL format"""
     if not url or not isinstance(url, str):
         return False
     url = url.strip()
@@ -125,74 +128,95 @@ def is_valid_url(url):
     return True
 
 
+def has_real_content(url, timeout=10):
+    """
+    ⭐ SMART CHECK - ne tik HTTP status, bet CONTENT!
+    - Atidarti URL su GET
+    - Tikrinti ar yra real turinio
+    - Nepridedam search results!
+    """
+    if not is_valid_url(url):
+        print(f"❌ Invalid", end="")
+        return False
+    
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        r = requests.get(url, timeout=timeout, headers=headers, allow_redirects=True)
+        
+        # HTTP status check
+        if r.status_code >= 400:
+            print(f"❌ {r.status_code}", end="")
+            return False
+        
+        content = r.text.lower()
+        
+        # RED FLAGS
+        if "404" in content or "not found" in content:
+            print(f"❌ 404 text", end="")
+            return False
+        
+        if len(content) < 500:
+            print(f"❌ Too small", end="")
+            return False
+        
+        if "search" in url.lower() and "q=" in url.lower():
+            print(f"⚠️ Search page", end="")
+            return False
+        
+        # ✅ VALID
+        print(f"✅ OK", end="")
+        return True
+        
+    except requests.exceptions.Timeout:
+        print(f"⏱️ Timeout", end="")
+        return False
+    except:
+        print(f"❌ Error", end="")
+        return False
+
+
 def extract_domain(url):
-    """Ištraukia domain iš URL"""
+    """Get domain"""
     try:
         parsed = urlparse(url)
-        domain = parsed.netloc.replace("www.", "")
-        return domain
+        return parsed.netloc.replace("www.", "")
     except:
         return None
 
 
-def check_url_accessible(url, timeout=10):
-    """Tikrina ar URL accessible"""
-    if not is_valid_url(url):
-        return False
-    try:
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        r = requests.head(url, timeout=timeout, headers=headers, allow_redirects=True)
-        return r.status_code < 400
-    except:
-        return False
-
-
 def get_alternative_url(url, name=""):
-    """Jei URL broken, siūlo alternative"""
+    """
+    TIKTAI trusted homepages, NE search results!
+    """
     domain = extract_domain(url)
     
     if domain:
         for trusted_domain, trusted_url in TRUSTED_SOURCES.items():
             if trusted_domain in domain:
-                print(f"      → Trusted: {trusted_url}")
-                return trusted_url
+                print(f" → {trusted_domain}: ", end="")
+                if has_real_content(trusted_url, timeout=5):
+                    return trusted_url
+                else:
+                    print(f" (also broken)")
+                    return None
     
-    if name:
-        alt = f"https://www.opensecrets.org/search?q={name.replace(' ', '+')}"
-        print(f"      → OpenSecrets: {alt}")
-        return alt
-    
+    # ❌ NO SEARCH RESULTS!
+    print(f" → NO fallback (skip)", end="")
     return None
 
 
 def get_quiver_url(name):
-    """Kuria fresh QuiverQuant URL"""
+    """Fresh Quiver URL"""
     if name not in BIOGUIDE_MAP:
         return None
     
     first_name, last_name, bioguide_id = BIOGUIDE_MAP[name]
-    
     if not bioguide_id:
         return None
     
     full_name = f"{first_name} {last_name}"
     encoded_name = urllib.parse.quote(full_name)
-    quiver_url = f"https://www.quiverquant.com/congresstrading/politician/{encoded_name}-{bioguide_id}"
-    
-    return quiver_url
-
-
-def validate_quiver_url(url):
-    """Tikrina ar QuiverQuant URL veikia"""
-    if not url or "quiverquant.com" not in url:
-        return False
-    
-    try:
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        r = requests.head(url, timeout=8, headers=headers, allow_redirects=True)
-        return r.status_code < 400
-    except:
-        return False
+    return f"https://www.quiverquant.com/congresstrading/politician/{encoded_name}-{bioguide_id}"
 
 
 # ═════════════════════════════════════════════════════════════
@@ -200,7 +224,7 @@ def validate_quiver_url(url):
 # ═════════════════════════════════════════════════════════════
 
 def fix_sources_field(sources_text, name=""):
-    """Fiksuoja sources ACF field"""
+    """Fix ACF sources - ONLY valid URLs"""
     if not sources_text:
         return sources_text, False
     
@@ -210,51 +234,52 @@ def fix_sources_field(sources_text, name=""):
     
     for i, line in enumerate(lines, 1):
         url = line.strip()
-        
         if not url:
             continue
         
-        # Quiver special handling
+        # Quiver
         if "quiverquant.com" in url:
             print(f"      [Source {i}] Quiver: ", end="")
             
-            if check_url_accessible(url, timeout=5):
-                print(f"✅ OK")
+            if has_real_content(url, timeout=5):
+                print()
                 fixed_lines.append(url)
                 continue
             
-            print(f"\n        ❌ Broken, regenerating...")
-            fresh_quiver = get_quiver_url(name)
-            
-            if fresh_quiver and validate_quiver_url(fresh_quiver):
-                print(f"        ✅ NEW Quiver URL works!")
-                fixed_lines.append(fresh_quiver)
-                changed = True
+            print(f"\n        Regenerating...")
+            fresh = get_quiver_url(name)
+            if fresh:
+                print(f"        [Fresh] ", end="")
+                if has_real_content(fresh, timeout=5):
+                    print()
+                    fixed_lines.append(fresh)
+                    changed = True
+                    stats["urls_fixed"] += 1
+                else:
+                    print(f" (broken too)")
+                    changed = True
+                    stats["urls_broken"] += 1
             else:
-                print(f"        ⚠️ Can't regenerate - skipping")
+                print(f"        No ID")
                 changed = True
+                stats["urls_broken"] += 1
             continue
         
         # Regular URL
-        print(f"      [Source {i}] {url[:50]}...", end=" ")
-        
-        if not is_valid_url(url):
-            print(f"❌ Invalid")
-            changed = True
-            alt = get_alternative_url(url, name)
-            if alt:
-                fixed_lines.append(alt)
-            continue
-        
-        if check_url_accessible(url, timeout=5):
-            print(f"✅ OK")
+        print(f"      [Source {i}] ", end="")
+        if has_real_content(url, timeout=5):
+            print()
             fixed_lines.append(url)
         else:
-            print(f"❌ BROKEN")
+            print()
             changed = True
+            stats["urls_broken"] += 1
+            
             alt = get_alternative_url(url, name)
             if alt:
+                print()
                 fixed_lines.append(alt)
+                stats["urls_fixed"] += 1
     
     return "\n".join(fixed_lines), changed
 
@@ -264,37 +289,32 @@ def fix_sources_field(sources_text, name=""):
 # ═════════════════════════════════════════════════════════════
 
 def fix_html_references(html_content, name=""):
-    """Fiksuoja broken URLs HTML content'e"""
+    """Fix HTML references - ONLY valid content"""
     if not html_content or "references-section" not in html_content:
         return html_content, False
     
     changed = False
-    
-    # Rindi <li><a href="...">...</a></li> patterns
     link_pattern = r'<li>\s*<a\s+href=["\']([^"\']+)["\'][^>]*>([^<]+)</a>\s*</li>'
     links = re.findall(link_pattern, html_content)
     
     print(f"      Found {len(links)} references")
     
     for i, (url, label) in enumerate(links, 1):
-        print(f"      [Ref {i}] {url[:50]}...", end=" ")
+        print(f"      [Ref {i}] ", end="")
         
-        if not is_valid_url(url):
-            print(f"❌ Invalid")
-            continue
-        
-        if check_url_accessible(url, timeout=5):
-            print(f"✅ OK")
+        if has_real_content(url, timeout=5):
+            print()
         else:
-            print(f"❌ BROKEN")
+            print()
             changed = True
+            stats["urls_broken"] += 1
             
             alt = get_alternative_url(url, name)
             if alt:
                 old_link = f'href="{url}"'
                 new_link = f'href="{alt}"'
                 html_content = html_content.replace(old_link, new_link)
-                print(f"        → Fixed")
+                stats["urls_fixed"] += 1
     
     return html_content, changed
 
@@ -304,7 +324,7 @@ def fix_html_references(html_content, name=""):
 # ═════════════════════════════════════════════════════════════
 
 def get_all_posts(page=1):
-    """Gauna visus posts"""
+    """Get all posts"""
     try:
         res = requests.get(
             f"{WP_BASE_URL}/wp/v2/posts",
@@ -321,31 +341,26 @@ def get_all_posts(page=1):
         if res.status_code == 200:
             total_pages = int(res.headers.get("X-WP-TotalPages", 1))
             return res.json(), total_pages
-        print(f"❌ API Error: {res.status_code}")
         return [], 1
-    except Exception as e:
-        print(f"❌ Request error: {e}")
+    except:
         return [], 1
 
 
 def get_post_full(post_id):
-    """Gauna full post data"""
+    """Get post"""
     try:
         res = requests.get(
             f"{WP_BASE_URL}/wp/v2/posts/{post_id}?acf_format=standard",
             auth=(WP_USER, WP_PASS),
             timeout=WP_TIMEOUT,
         )
-        if res.status_code == 200:
-            return res.json()
-        return None
-    except Exception as e:
-        print(f"  ❌ Failed to fetch post {post_id}")
+        return res.json() if res.status_code == 200 else None
+    except:
         return None
 
 
 def update_post(post_id, payload):
-    """Atnaujina post"""
+    """Update post"""
     try:
         res = requests.post(
             f"{WP_BASE_URL}/wp/v2/posts/{post_id}",
@@ -354,17 +369,16 @@ def update_post(post_id, payload):
             timeout=WP_TIMEOUT,
         )
         return res.status_code == 200
-    except Exception as e:
-        print(f"    ❌ Update error: {e}")
+    except:
         return False
 
 
 # ═════════════════════════════════════════════════════════════
-# MAIN LOGIC
+# MAIN
 # ═════════════════════════════════════════════════════════════
 
 def process_post(post_data):
-    """Apdoroja vieną postą"""
+    """Process one post"""
     post_id = post_data.get("id")
     title = post_data.get("title", {})
     if isinstance(title, dict):
@@ -374,51 +388,41 @@ def process_post(post_data):
     sources = acf.get("sources", "")
     
     content = post_data.get("content", {})
-    if isinstance(content, dict):
-        html_content = content.get("raw", "")
-    else:
-        html_content = content
+    html_content = content.get("raw", "") if isinstance(content, dict) else content
     
     stats["total_posts"] += 1
-    
     print(f"\n📄 {post_id} - {title[:50]}")
     
     acf_updated = False
     html_updated = False
     
-    # ACF SOURCES
+    # ACF
     if sources:
         stats["posts_with_acf"] += 1
-        print(f"  🔗 ACF Sources ({len(sources.split(chr(10)))} lines)")
-        fixed_sources, changed = fix_sources_field(sources, name=title)
-        
+        print(f"  🔗 ACF ({len(sources.split(chr(10)))} lines)")
+        fixed, changed = fix_sources_field(sources, name=title)
         if changed:
             acf_updated = True
             print(f"    📤 Updating ACF...")
-            update_post(post_id, {"acf": {"sources": fixed_sources}})
+            update_post(post_id, {"acf": {"sources": fixed}})
     
-    # HTML REFERENCES
+    # HTML
     if html_content and "references-section" in html_content:
         stats["posts_with_html"] += 1
         print(f"  📄 HTML References")
-        fixed_html, changed = fix_html_references(html_content, name=title)
-        
+        fixed, changed = fix_html_references(html_content, name=title)
         if changed:
             html_updated = True
             print(f"    📤 Updating HTML...")
-            update_post(post_id, {"content": fixed_html})
+            update_post(post_id, {"content": fixed})
     
-    # Summary
     if acf_updated or html_updated:
         stats["posts_updated"] += 1
         print(f"  ✅ UPDATED")
-        return True
-    
-    return False
 
 
 def main():
-    print(f"🔍 Scanning WordPress posts...\n")
+    print(f"🔍 Scanning posts...\n")
     
     total_pages = 1
     page = 1
@@ -428,7 +432,6 @@ def main():
         posts, total_pages = get_all_posts(page=page)
         
         if not posts:
-            print("  ❌ No posts found")
             break
         
         for post in posts:
@@ -441,27 +444,29 @@ def main():
     
     # Summary
     print(f"\n\n{'='*55}")
-    print(f"✅ REZULTATAI:")
+    print(f"✅ RESULTS:")
     print(f"{'='*55}")
-    print(f"📊 Total posts: {stats['total_posts']}")
-    print(f"🔗 Posts with ACF sources: {stats['posts_with_acf']}")
-    print(f"📄 Posts with HTML references: {stats['posts_with_html']}")
-    print(f"🔧 Posts updated: {stats['posts_updated']}")
+    print(f"📊 Total: {stats['total_posts']}")
+    print(f"🔗 With ACF: {stats['posts_with_acf']}")
+    print(f"📄 With HTML: {stats['posts_with_html']}")
+    print(f"🔧 Updated: {stats['posts_updated']}")
+    print(f"❌ Broken: {stats['urls_broken']}")
+    print(f"✅ Fixed: {stats['urls_fixed']}")
     print(f"{'='*55}")
 
 
 if __name__ == "__main__":
     if not WP_USER or not WP_PASS:
-        print("❌ KLAIDA: Set WP_USERNAME and WP_APP_PASS env vars!")
+        print("❌ Set env vars!")
         sys.exit(1)
     
     try:
         main()
     except KeyboardInterrupt:
-        print("\n\n❌ Interrupted")
+        print("\n❌ Interrupted")
         sys.exit(0)
     except Exception as e:
-        print(f"\n\n❌ FATAL: {e}")
+        print(f"\n❌ FATAL: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
