@@ -1,20 +1,8 @@
-#!/usr/bin/env python3
 import os, requests, json, re, time, sys, urllib.parse, random
 from datetime import datetime, timezone, timedelta
 
 sys.stdout.reconfigure(line_buffering=True)
-print("--- BOTAS v4.1 (URL VALIDATION + SMART SCHEDULING + PERSON_URLS) STARTUOJA ---")
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Load person_urls_master.py - USED FOR SOURCES!
-# ═══════════════════════════════════════════════════════════════════════════
-PERSON_URLS_MASTER = {}
-try:
-    from person_urls_master import PERSON_URLS
-    PERSON_URLS_MASTER = PERSON_URLS
-    print(f"✅ Loaded person_urls_master.py ({len(PERSON_URLS)} people)\n")
-except ImportError:
-    print("⚠️ person_urls_master.py not found - will use Gemini sources only\n")
+print("--- BOTAS STARTUOJA v3.0 ---")
 
 GEMINI_KEY  = os.getenv("GEMINI_API_KEY")
 WP_USER     = os.getenv("WP_USERNAME")
@@ -65,12 +53,12 @@ BIOGUIDE_MAP = {
     "Mitch McConnell": ("Mitch", "McConnell", "M000355"),
     "Chuck Schumer": ("Charles E.", "Schumer", "S000148"),
     "Lindsey Graham": ("Lindsey", "Graham", "G000359"),
-    "Rich McCormick": ("Rich", "McCormick", "M000223"),
-    "Mark Green": ("Mark", "Green", "G000576"),
+    "Rich McCormick": ("Rich", "McCormick", "M001216"),
+    "Mark Green": ("Mark E.", "Green", "G000590"),
     "Josh Hawley": ("Josh", "Hawley", "H001089"),
-    "Darrell Issa": ("Darrell Eugene", "Issa", "I000056"),
-    "Ron Wyden": ("Ronald Lee", "Wyden", "W000779"),
-    "Ronald Reagan": ("Ronald Wilson", "Reagan", ""),
+    "Darrell Issa": ("Darrell", "Issa", "I000056"),
+    "Ron Wyden": ("Ron", "Wyden", "W000779"),
+    "Ronald Reagan": ("Ronald", "Reagan", ""),
     "Abraham Lincoln": ("Abraham", "Lincoln", ""),
 }
 
@@ -80,34 +68,51 @@ WEALTH_OPTIONS = [
     "Corporate Board Seats", "Consulting Fees", "Hedge Fund Interests", "Cryptocurrency Assets",
 ]
 
+# Žinomi net worth skaičiai iš patikimų šaltinių (Forbes/Bloomberg/CelebrityNetWorth 2025-2026)
 KNOWN_NET_WORTHS = {
-    "Donald Trump": 7300000000,
-    "Barack Obama": 70000000,
-    "Joe Biden": 10000000,
-    "Kamala Harris": 8000000,
-    "Hillary Clinton": 50000000,
-    "Bernie Sanders": 3000000,
-    "Nancy Pelosi": 260000000,
-    "Mike Bloomberg": 110000000000,
-    "Elon Musk": 300000000000,
-    "Michelle Obama": 70000000,
-    "George W. Bush": 50000000,
-    "Bill Clinton": 120000000,
-    "Nikki Haley": 8000000,
-    "Ron DeSantis": 2000000,
-    "Gavin Newsom": 20000000,
-    "Marco Rubio": 2000000,
-    "Ted Cruz": 4000000,
-    "Mitt Romney": 300000000,
-    "Alexandria Ocasio-Cortez": 200000,
-    "Pete Buttigieg": 1500000,
-    "Rich McCormick": 2000000,
-    "Mark Green": 4000000,
-    "Josh Hawley": 1500000,
-    "Darrell Issa": 250000000,
-    "Ron Wyden": 2000000,
-    "Ronald Reagan": 13000000,
-    "Abraham Lincoln": 100000,
+    "Donald Trump":               7300000000,
+    "Barack Obama":               70000000,
+    "Joe Biden":                  10000000,
+    "Kamala Harris":              8000000,
+    "Hillary Clinton":            120000000,   # Forbes ~$120M (ne $50M)
+    "Bernie Sanders":             3000000,
+    "Nancy Pelosi":               260000000,
+    "Mike Bloomberg":             110000000000,
+    "Elon Musk":                  300000000000,
+    "Ali Khamenei":               95000000000,  # Setad empire - visur taip cituojama
+    "Michelle Obama":             70000000,
+    "George W. Bush":             50000000,
+    "Bill Clinton":               120000000,
+    "Nikki Haley":                8000000,
+    "Ron DeSantis":               2000000,
+    "Gavin Newsom":               20000000,
+    "Marco Rubio":                2000000,
+    "Ted Cruz":                   4000000,
+    "Mitt Romney":                300000000,
+    "Alexandria Ocasio-Cortez":   200000,
+    "Pete Buttigieg":             1500000,
+    "Jared Kushner":              800000000,
+    "Ivanka Trump":               300000000,
+    "Condoleezza Rice":           8000000,
+    "Dick Cheney":                90000000,    # ne $150M
+    "Al Gore":                    300000000,
+    "Tulsi Gabbard":              2000000,     # ne $55M
+    "Vivek Ramaswamy":            950000000,
+    "Robert F. Kennedy Jr.":      12000000,
+    "Liz Cheney":                 8000000,
+    "Lindsey Graham":             3000000,
+    "Mike Pence":                 3000000,
+    "John Kerry":                 250000000,   # Teresa Heinz turtas
+    "Mitch McConnell":            35000000,
+    "Paul Ryan":                  9000000,
+    # Nauji 2026-03-09
+    "Rich McCormick":             1000000,    # GA kongresistas, ~$1M
+    "Mark Green":                 4000000,    # TN kongresistas, ~$4M
+    "Josh Hawley":                2000000,    # MO senatorius, ~$2M
+    "Darrell Issa":               500000000,  # CA kongresistas, ~$500M (turtingiausias kongrese)
+    "Ron Wyden":                  3000000,    # OR senatorius, ~$3M
+    "Ronald Reagan":              13000000,   # mirė su ~$13M
+    "Abraham Lincoln":            110000,     # ~$110K istoriškai
 }
 
 CAT_MAP = {
@@ -127,42 +132,6 @@ PARENT_CAT = {
 
 stats = {"ok": 0, "fail": 0, "skip": 0}
 
-BLOCKED_URL_PATTERNS = [
-    "vertexaisearch", "googleapis.com", "google.com/search",
-    "gstatic.com", "googleusercontent.com", "youtube.com/watch",
-    "twitter.com", "x.com/", "facebook.com", "instagram.com", "tiktok.com",
-    "reddit.com", "wikipedia.org",
-]
-
-# ═════════════════════════════════════════════════════════════════════════════
-# URL VALIDATION
-# ═════════════════════════════════════════════════════════════════════════════
-
-def test_url_alive(url, timeout=5):
-    if not url or not url.startswith("http"):
-        return False
-    try:
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        r = requests.get(url, timeout=timeout, headers=headers, allow_redirects=True)
-        if r.status_code >= 400:
-            return False
-        content = r.text.lower()
-        if any(err in content for err in ["404", "not found", "error 500", "page not found"]):
-            return False
-        if len(r.text) < 500:
-            return False
-        return True
-    except:
-        return False
-
-def is_valid_source_url(url):
-    url = url.strip()
-    if not url or not url.startswith("http"):
-        return False
-    for blocked in BLOCKED_URL_PATTERNS:
-        if blocked in url:
-            return False
-    return True
 
 # ─── GEMINI ──────────────────────────────────────────────────────────────────
 
@@ -235,6 +204,7 @@ def call_gemini(prompt, gemini_url, retries=4):
 # ─── JSON PARSING ─────────────────────────────────────────────────────────────
 
 def fix_json_control_chars(text):
+    """Pakeičia realius control simbolius į escape sequences string reikšmėse"""
     result = []
     in_string = False
     escape_next = False
@@ -260,6 +230,11 @@ def fix_json_control_chars(text):
 
 
 def fix_html_quotes_in_json(text):
+    """
+    Pakeičia HTML atributų double quotes į single quotes JSON stringo viduje.
+    Pvz: <a href="url"> -> <a href='url'>
+    Naudoja state machine kad teisingai atpažintų JSON string ribas.
+    """
     result = []
     i = 0
     in_json_string = False
@@ -287,14 +262,17 @@ def fix_html_quotes_in_json(text):
                 i += 1
                 continue
             else:
+                # Ar esame HTML tago viduje?
                 recent = "".join(result[-300:])
                 last_lt = recent.rfind("<")
                 last_gt = recent.rfind(">")
                 in_html_tag = last_lt > last_gt
 
                 if in_html_tag:
+                    # HTML atributo kabutė - pakeičiame į single quote
                     result.append("'")
                     i += 1
+                    # Einame iki kitos closing " ir ją irgi pakeičiame
                     while i < len(text) and text[i] not in ('"', '>'):
                         result.append(text[i])
                         i += 1
@@ -303,6 +281,7 @@ def fix_html_quotes_in_json(text):
                         i += 1
                     continue
                 else:
+                    # Tikra JSON stringo pabaiga
                     in_json_string = False
                     result.append(ch)
                     i += 1
@@ -315,6 +294,7 @@ def fix_html_quotes_in_json(text):
 
 
 def extract_fields_by_regex(text):
+    """Paskutinis fallback - ištraukia laukus regex kai JSON neparse"""
     data = {}
     art = re.search(r'"article"\s*:\s*"(.*?)(?=",\s*"(?:net_worth|job_title))', text, re.DOTALL)
     if art: data["article"] = art.group(1).replace('\\"', '"')
@@ -338,6 +318,7 @@ def extract_fields_by_regex(text):
     if urls_m:
         found = re.findall(r'"(https?://[^"\s]+)"', urls_m.group(1))
         data["urls"] = [u for u in found if is_valid_source_url(u)][:4]
+    # FAQ - traukiame visus question/answer porus
     faq_items = re.findall(
         r'\{\s*"question"\s*:\s*"([^"]+)"\s*,\s*"answer"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}',
         text, re.DOTALL
@@ -352,17 +333,21 @@ def extract_fields_by_regex(text):
 def parse_json(text):
     text = text.strip()
 
+    # DEBUG - išsaugome raw tekstą analizei
     try:
         with open("last_gemini_raw.txt", "w", encoding="utf-8") as dbf:
             dbf.write(text)
     except: pass
 
+    # 1. Fix control chars + tiesiogiai
     text_fixed = fix_json_control_chars(text)
     for t in [text_fixed, text]:
         try: return json.loads(t)
         except: pass
 
-    tw = text_fixed
+    # 2. Ištraukiame article lauką ir pakeičiame vidines kabutes
+    # Gemini rašo: "The Art of the Deal" su kabutėmis article viduje - tai laužo JSON
+    tw = text_fixed  # default
     m = re.search(r'\{"article"\s*:\s*"(.*?)",\s*"net_worth"', text_fixed, re.DOTALL)
     if m:
         art_clean = m.group(1).replace('"', "'")
@@ -373,12 +358,14 @@ def parse_json(text):
             snippet = tw[max(0, e.pos-30):e.pos+30]
             print(f"    Article fix klaida pos={e.pos}: {repr(snippet)}")
 
+    # 3. Nuo { iki paskutinio }
     s = tw.find("{")
     e = tw.rfind("}")
     if s != -1 and e != -1 and e > s:
         try: return json.loads(tw[s:e+1])
         except: pass
 
+    # 4. Nupjautas JSON - karpome nuo galo, grąžiname geriausią
     if s != -1:
         chunk = tw[s:]
         best = None
@@ -402,6 +389,7 @@ def parse_json(text):
             print(f"    JSON iš dalies atkurtas ({best_fields} laukai)")
             return best
 
+    # 5. Paskutinis fallback - regex
     print("    Bandome regex extraction...")
     result = extract_fields_by_regex(text)
     if result:
@@ -412,6 +400,7 @@ def parse_json(text):
 
 
 def extract_text_from_gemini(res):
+    """Ištraukia JSON tekstą ir grounding URLs iš Gemini atsakymo"""
     if not res or "candidates" not in res:
         return None, None, "no candidates"
     try:
@@ -419,6 +408,7 @@ def extract_text_from_gemini(res):
         reason = cand.get("finishReason", "UNKNOWN")
         parts = cand.get("content", {}).get("parts", [])
 
+        # Imame tik text parts
         text_parts = [p.get("text", "").strip() for p in parts if "text" in p and p.get("text", "").strip()]
         full_text = "".join(text_parts)
         print(f"    {len(full_text)} simboliu, reason: {reason}, parts: {len(text_parts)}")
@@ -428,14 +418,26 @@ def extract_text_from_gemini(res):
         if not full_text:
             return None, None, "tuscias atsakymas"
 
+        # Ištraukiame grounding URLs iš metadata (realios Google Search nuorodos)
         grounding_urls = []
         gm = cand.get("groundingMetadata", {})
         all_chunks = gm.get("groundingChunks", [])
         print(f"    groundingChunks: {len(all_chunks)}")
 
+        # webSearchQueries - paieškos užklausos (ne URL, bet matyti kas ieškota)
         wsq = gm.get("webSearchQueries", [])
         if wsq: print(f"    webSearchQueries: {wsq[:3]}")
 
+        # groundingSupports - gali turėti tikrus URL
+        supports = gm.get("groundingSupports", [])
+        if supports:
+            print(f"    groundingSupports[0] keys: {list(supports[0].keys()) if supports else []}")
+            print(f"    groundingSupports[0]: {str(supports[0])[:200]}")
+
+        # Visi chunk URL yra vertexaisearch redirect - nerealūs, praleisti
+        # Vietoj to imsime iš Gemini JSON "urls" lauko arba generuosime iš webSearchQueries
+
+        # Su google_search Gemini gali grąžinti: [search_results_text, json_text]
         json_text = None
         for part in reversed(text_parts):
             if part.startswith("{"):
@@ -457,17 +459,23 @@ def extract_text_from_gemini(res):
 
 
 def validate_net_worth(name, net_worth_int):
+    """Tikrina ar net_worth realistiškas. Jei per toli nuo žinomo – override."""
     known = KNOWN_NET_WORTHS.get(name)
-    if not known or net_worth_int <= 0:
+    if not known:
         return net_worth_int
+    # Jei Gemini grąžino 0 arba labai mažą - naudojame žinomą
+    if net_worth_int <= 0:
+        print(f"    ⚠️ NW=0, naudojame žinomą: {known:,}")
+        return known
     ratio = net_worth_int / known
-    if ratio > 3.0 or ratio < 0.25:
+    if ratio > 2.5 or ratio < 0.3:
         print(f"    ⚠️ NW {net_worth_int:,} neatitinka žinomo {known:,} (ratio={ratio:.1f}x) → naudojame žinomą")
         return known
     return net_worth_int
 
 
 def check_required_fields(data):
+    """Tikrina ar visi būtini laukai užpildyti. Grąžina trūkstamų sąrašą."""
     missing = []
     article = data.get("article", "")
     if not article or len(article) < 800:
@@ -480,6 +488,7 @@ def check_required_fields(data):
         missing.append("history tuščia arba placeholder")
     if not str(data.get("job_title", "")).strip():
         missing.append("job_title tuščias")
+    # faq - jei mažiau nei 4, papildome
     faq = data.get("faq", [])
     name_val = data.get("job_title", "this politician")
     nw_val = data.get("net_worth", 0)
@@ -610,6 +619,7 @@ def clean_history(raw):
 
 
 def fix_history_last(history, net_worth_int):
+    """Paskutinė history reikšmė VISADA = net_worth"""
     if not history or net_worth_int <= 0:
         return history
     parts = history.split(",")
@@ -627,38 +637,175 @@ def make_slug(name):
 
 
 def resolve_categories(cat_names):
-    cat_ids = {27}
+    cat_ids = {27}  # Visada "Most Searched Politicians"
     for n in cat_names:
         if n in CAT_MAP:
             cid = CAT_MAP[n]; cat_ids.add(cid)
             p = PARENT_CAT.get(cid)
             if p: cat_ids.add(p)
-    if len(cat_ids) <= 1: cat_ids.add(19)
+    if len(cat_ids) <= 1: cat_ids.add(19)  # Fallback: United States
     cat_ids.discard(None)
     return list(cat_ids)
 
 
-def get_person_urls(name):
-    """Get VERIFIED sources from person_urls_master.py"""
-    if name not in PERSON_URLS_MASTER:
-        return []
-    
-    sources = PERSON_URLS_MASTER[name]
-    urls = [s["url"] for s in sources]
-    
-    print(f"      Using person_urls_master for {name}: {len(urls)} sources")
-    return urls
+BLOCKED_URL_PATTERNS = [
+    "vertexaisearch", "googleapis.com", "google.com/search",
+    "gstatic.com", "googleusercontent.com", "youtube.com/watch",
+    "twitter.com", "x.com/", "facebook.com", "instagram.com", "tiktok.com",
+    "reddit.com", "wikipedia.org",
+]
 
+TRUSTED_SOURCE_DOMAINS = [
+    "forbes.com", "bloomberg.com", "businessinsider.com", "cnbc.com",
+    "wsj.com", "nytimes.com", "washingtonpost.com", "thehill.com",
+    "politico.com", "reuters.com", "apnews.com", "cnn.com",
+    "foxnews.com", "usatoday.com", "marketwatch.com", "investopedia.com",
+    "celebritynetworth.com", "moneyinc.com", "wealthygorilla.com",
+    "opensecrets.org", "ballotpedia.org", "govtrack.us", "congress.gov",
+    "rollcall.com", "thestreet.com", "bankrate.com", "gobankingrates.com",
+    "time.com", "theatlantic.com", "nationalreview.com", "slate.com",
+]
+
+_URL_CHECK_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+def check_url_alive(url, timeout=10):
+    """
+    Tikrina ar URL egzistuoja.
+    - 200-399 = OK (veikia)
+    - 403/429 = botų blokas, bet puslapis EGZISTUOJA → laikome OK
+    - 404/410/500+ = neegzistuoja arba klaida → False
+    """
+    try:
+        r = requests.get(url, timeout=timeout, allow_redirects=True,
+                         headers=_URL_CHECK_HEADERS, stream=True)
+        r.close()
+        # 403/429 = anti-bot, bet URL realus
+        if r.status_code in (403, 429, 401):
+            return True
+        return r.status_code < 400
+    except requests.exceptions.SSLError:
+        return False  # SSL klaida - tikrai problema
+    except requests.exceptions.ConnectionError:
+        return False
+    except requests.exceptions.Timeout:
+        # Timeout gali reikšti kad serveris yra, bet lėtas - laikome True
+        return True
+    except Exception:
+        return False
+
+def search_real_sources(name, needed=4):
+    """
+    Ieško realių straipsnių apie politiką per DuckDuckGo HTML.
+    Grąžina sąrašą veikiančių URL iš patikimų domenų.
+    """
+    queries = [
+        f"{name} net worth 2026",
+        f"{name} net worth forbes",
+        f"{name} net worth wealth",
+    ]
+    found = []
+    seen_domains = set()
+
+    for query in queries:
+        if len(found) >= needed:
+            break
+        try:
+            params = {"q": query, "kl": "us-en"}
+            r = requests.get("https://html.duckduckgo.com/html/", params=params,
+                             headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+                             timeout=12)
+            if r.status_code != 200:
+                continue
+
+            # Ieškom URL iš DDG rezultatų
+            raw_urls = re.findall(r'href="(https?://[^"&]+)"', r.text)
+            for url in raw_urls:
+                if len(found) >= needed:
+                    break
+                url = url.strip()
+                # Filtruojam: tik patikimi domenai
+                domain = re.sub(r"https?://(www\.)?", "", url).split("/")[0]
+                if not any(td in domain for td in TRUSTED_SOURCE_DOMAINS):
+                    continue
+                # Nerodyti DDG pačių puslapių
+                if "duckduckgo.com" in url:
+                    continue
+                # Nerodyti per daug to paties domeno
+                base_domain = ".".join(domain.split(".")[-2:])
+                if base_domain in seen_domains:
+                    continue
+                # Tikrinti ar URL gyvas
+                print(f"      Tikrinama: {url[:70]}...")
+                if check_url_alive(url):
+                    found.append(url)
+                    seen_domains.add(base_domain)
+                    print(f"      ✓ Veikia: {url[:70]}")
+                else:
+                    print(f"      ✗ Neveikia: {url[:70]}")
+            time.sleep(1)  # DDG rate limit
+        except Exception as e:
+            print(f"      DDG paieška nepavyko: {e}")
+            continue
+
+    return found
+
+
+def verify_and_fix_sources(urls, name=""):
+    """
+    Patikrina kiekvieną URL ar veikia. Neveikiančius pakeičia per DDG paiešką.
+    Grąžina sąrašą iki 4 veikiančių URL.
+    """
+    print(f"    [sources] Tikriname {len(urls)} URL...")
+    verified = []
+    bad_count = 0
+
+    for url in urls:
+        url = url.strip()
+        if not is_valid_source_url(url):
+            continue
+        if check_url_alive(url):
+            verified.append(url)
+            print(f"    [sources] ✓ {url[:65]}")
+        else:
+            bad_count += 1
+            print(f"    [sources] ✗ Neveikia: {url[:65]}")
+
+    # Jei trūksta — papildom iš DDG
+    needed = 4 - len(verified)
+    if needed > 0:
+        print(f"    [sources] Ieškome {needed} papildomų šaltinių per DDG...")
+        extra = search_real_sources(name, needed=needed + 2)
+        # Nerodyti jau turimų domenų
+        existing_domains = set(".".join(re.sub(r"https?://(www\.)?","",u).split("/")[0].split(".")[-2:]) for u in verified)
+        for u in extra:
+            base = ".".join(re.sub(r"https?://(www\.)?","",u).split("/")[0].split(".")[-2:])
+            if base not in existing_domains and u not in verified:
+                verified.append(u)
+                existing_domains.add(base)
+            if len(verified) >= 4:
+                break
+
+    print(f"    [sources] Galutinis skaičius: {len(verified)} šaltiniai")
+    return verified[:4]
+
+
+
+    url = url.strip()
+    if not url or not url.startswith("http"):
+        return False
+    for blocked in BLOCKED_URL_PATTERNS:
+        if blocked in url:
+            return False
+    return True
 
 def format_sources(urls, name=""):
-    """Format sources with URL VALIDATION"""
     seen = set()
     final = []
     quiver_added = False
-    
-    print(f"      Testing {len(urls)} URLs...", end=" ")
-    tested = 0
-    
     for url in urls:
         url = url.strip()
         if "quiverquant.com" in url:
@@ -666,42 +813,24 @@ def format_sources(urls, name=""):
                 fn, ln, bio = BIOGUIDE_MAP[name]
                 if bio:
                     ne = urllib.parse.quote(f"{fn} {ln}")
-                    qurl = f"https://www.quiverquant.com/congresstrading/politician/{ne}-{bio}"
-                    if test_url_alive(qurl):
-                        final.append(qurl)
-                        quiver_added = True
-                        tested += 1
-                        print("✓", end="", flush=True)
-                    else:
-                        print("✗", end="", flush=True)
+                    final.append(f"https://www.quiverquant.com/congresstrading/politician/{ne}-{bio}")
+                    quiver_added = True
             continue
-        
         if is_valid_source_url(url) and url not in seen:
-            if test_url_alive(url):
-                seen.add(url)
-                final.append(url)
-                tested += 1
-                print("✓", end="", flush=True)
-            else:
-                print("✗", end="", flush=True)
-        
+            seen.add(url)
+            final.append(url)
         if len(final) >= 4:
             break
-    
     if not quiver_added and name in BIOGUIDE_MAP:
         fn, ln, bio = BIOGUIDE_MAP[name]
         if bio:
             ne = urllib.parse.quote(f"{fn} {ln}")
-            qurl = f"https://www.quiverquant.com/congresstrading/politician/{ne}-{bio}"
-            if test_url_alive(qurl):
-                final.append(qurl)
-                tested += 1
-    
-    print(f" {tested} working")
+            final.append(f"https://www.quiverquant.com/congresstrading/politician/{ne}-{bio}")
     return "\n".join(u for u in final if u)
 
 
 def build_toc_html(article_html):
+    """Generuoja Table of Contents iš H2 tagų su anchor ID"""
     import re as _re
     h2s = _re.findall(r'<h2[^>]*>(.*?)</h2>', article_html, _re.IGNORECASE | _re.DOTALL)
     if len(h2s) < 2:
@@ -713,6 +842,7 @@ def build_toc_html(article_html):
         clean = _re.sub('<[^>]+>', '', h2_text).strip()
         anchor = f"toc-{i+1}-{_re.sub(r'[^a-z0-9]+', '-', clean.lower()).strip('-')[:40]}"
         toc_items.append(f'<li style="margin:0"><a href="#{anchor}" style="color:#2563eb;text-decoration:none">{clean}</a></li>')
+        # Pridedame id į H2 tagą
         new_html = new_html.replace(f'<h2>{h2_text}</h2>', f'<h2 id="{anchor}">{h2_text}</h2>', 1)
 
     toc = (
@@ -724,6 +854,18 @@ def build_toc_html(article_html):
         + '</ol></div>'
     )
     return new_html, toc
+
+
+def build_article_css():
+    return """<style>
+.pnw-article{max-width:780px;font-size:17px;line-height:1.75;color:#1e293b}
+.pnw-article p{margin:0 0 20px}
+.pnw-article h2{font-size:26px;font-weight:800;color:#0f172a;margin:44px 0 14px;padding-top:8px;border-top:2px solid #e2e8f0;line-height:1.3}
+.pnw-article h3{font-size:19px;font-weight:700;color:#0f172a;margin:28px 0 10px}
+.pnw-article ul,.pnw-article ol{margin:0 0 20px;padding-left:24px}
+.pnw-article li{margin-bottom:6px}
+.pnw-article strong{color:#0f172a}
+</style>"""
 
 
 def build_faq_html(faq_items):
@@ -754,7 +896,6 @@ def build_faq_html(faq_items):
 
 
 def build_references_html(urls):
-    """Build references HTML - with tested URLs"""
     month_year = datetime.now().strftime("%B %Y")
     label_map = {
         "opensecrets.org": "OpenSecrets – Personal Finances",
@@ -773,8 +914,6 @@ def build_references_html(urls):
     seen_domains = set()
     for url in urls:
         if not is_valid_source_url(url):
-            continue
-        if not test_url_alive(url):
             continue
         domain = re.sub(r"https?://(www\.)?", "", url).split("/")[0]
         if domain in seen_domains:
@@ -832,11 +971,12 @@ Create 5 H2 headings that are SPECIFIC to {name} — based on actual facts you f
 DO NOT use generic headings like "Income Streams Explained" or "The Number Behind X's Name".
 Each H2 must reference something REAL and SPECIFIC about {name}'s finances.
 
-Examples of GOOD specific H2s:
-- "How Mar-a-Lago Became Trump's Cash Machine"
-- "The $65M Obama Book Deal That Changed Everything"
-- "From $-1M Debt to $8M: Nikki Haley's Fastest Payday"
-- "Why Sanders Owns 3 Houses on a Senator's Salary"
+Examples of GOOD specific H2s (these are just examples — create your own based on {name}'s actual story):
+- "How Mar-a-Lago Became Trump's Cash Machine" (specific property)
+- "The $65M Obama Book Deal That Changed Everything" (specific deal with amount)
+- "From $-1M Debt to $8M: Nikki Haley's Fastest Payday" (specific contrast)
+- "Why Sanders Owns 3 Houses on a Senator's Salary" (specific counterintuitive fact)
+- "The Setad Fund: Khamenei's $95B Shadow Empire" (specific organization)
 
 Structure: opening hook → 5 unique H2 sections based on {name}'s real financial story""",
 
@@ -845,7 +985,14 @@ Structure: opening hook → 5 unique H2 sections based on {name}'s real financia
 Write 5 H2 headings that could ONLY apply to {name} — not to any other politician.
 Each heading must contain either: a specific dollar amount, a specific asset name, a specific year, or a specific surprising fact.
 
-Structure: opening hook → 5 unique H2 sections.""",
+Structure: opening hook → 5 unique H2 sections. Each section must feel like it belongs in a magazine profile of {name} specifically.""",
+
+        f"""ANGLE: {angle}
+
+Your H2 headings must be so specific that a reader instantly knows this article is about {name}.
+Use real names of properties, real dollar figures, real years, real events from {name}'s financial history.
+
+Structure: opening hook → 5 unique H2 sections that tell {name}'s specific financial story from search results.""",
     ]
     structure = random.choice(structures)
 
@@ -854,38 +1001,51 @@ Structure: opening hook → 5 unique H2 sections.""",
     return f"""You are a financial reporter writing for a general audience. Write a unique, well-researched profile of {name}'s finances.
 
 CRITICAL — NET WORTH ACCURACY:
-1. Search RIGHT NOW: "{name} net worth 2026"
-2. Use the MOST COMMONLY REPORTED net worth figure
-3. NEVER invent a figure
-4. "history" must use REAL verified figures for each year
-5. Last entry MUST equal net_worth exactly
+1. Search RIGHT NOW: "{name} net worth 2026" + "{name} net worth site:forbes.com OR site:bloomberg.com OR site:celebritynetworth.com"
+2. Use the figure that appears MOST OFTEN across credible sources. Do not invent or average.
+3. Use the MOST COMMONLY REPORTED net worth figure — even if it includes controlled assets:
+   - Ali Khamenei: most sources cite ~$95 billion (Setad empire) → net_worth = 95000000000
+   - Donald Trump: Forbes 2025 cites ~$7.3B → net_worth = 7300000000
+   - Kamala Harris: OpenSecrets/Forbes cite ~$8M → net_worth = 8000000
+   - Barack Obama: Celebrity Net Worth cites ~$70M → net_worth = 70000000
+4. NEVER invent a figure. If sources conflict, use the LOWER credible estimate.
+5. "history" must use REAL verified figures for each year — not a trend line you made up.
+   - Search: "{name} net worth [year]" for multiple years if needed
+   - Show real declines if they happened
+   - Last entry MUST equal net_worth exactly
 
 WRITING RULES:
 - Article MUST be 1050-1250 words
 - Article MUST have minimum 5 H2 sections
-- ONLY verified real facts
-- Use specific numbers: "$47,000 Senate salary"
-- Include 2+ facts most people don't know about this person's finances
-- Write like a smart friend explaining — not a textbook
-- Short punchy sentences mixed with longer ones
+- ONLY verified real facts — no invented numbers
+- Use specific numbers: "$47,000 Senate salary" not "congressional salary"
+- Include 2+ facts most people genuinely don't know about this person's finances
+- Write like a smart friend explaining over coffee — casual, clear, direct
+- Short sentences. Plain words. No jargon. If a 12-year-old can't understand it, rewrite it.
+- Avoid long paragraphs — max 3 sentences per paragraph
+- Be specific: "a $2.1M condo in Georgetown" beats "Washington D.C. property"
+- No academic tone, no formal language, no complex sentence structures
 
-BANNED WORDS:
+BANNED WORDS AND PHRASES — never use these:
 "it's worth noting", "delve into", "in conclusion", "moreover", "furthermore",
 "navigating", "landscape", "testament to", "shed light on", "pivotal role",
 "net worth journey", "financial journey", "in the world of", "underscores",
-"showcases", "lucrative", "multifaceted", "demonstrates", "significant"
+"showcases", "lucrative", "multifaceted", "demonstrates", "significant",
+"notably", "it is important to note", "interestingly", "this allowed him/her to",
+"leveraged", "garnered", "accumulated wealth", "amassed", "robust portfolio"
 
 ARTICLE STRUCTURE:
 {structure}
 
 TONE:
-- Opening: grab attention immediately — a surprising number, a contrast, a little-known fact
-- Mix data with story
-- Avoid corporate/AI-sounding language
+- Opening: grab attention immediately — a surprising number, a contrast, a little-known fact. Never start with "born in..."
+- Mix data with story — numbers need context and human interest
+- Avoid corporate/AI-sounding language. Write the way a journalist would actually talk.
 
-FAQ RULES — ALL 4 ARE REQUIRED:
+FAQ RULES — ALL 4 ARE REQUIRED, no exceptions:
 - Each answer must be 2-3 sentences with specific figures
 - Questions should be what real people actually Google
+- Answers must directly answer the question — no filler
 
 RETURN THIS EXACT JSON STRUCTURE — every field required:
 {{
@@ -897,7 +1057,7 @@ RETURN THIS EXACT JSON STRUCTURE — every field required:
   "assets": "One vivid specific sentence naming actual holdings with dollar values",
   "cats": ["Most Searched Politicians", "one category from list"],
   "urls": ["https://forbes.com/...", "https://opensecrets.org/...", "https://example.com/..."],
-  "seo_title": "REQUIRED: Must follow this exact format — '{name} Net Worth 2026: [unique hook]'. MAX 65 chars total.",
+  "seo_title": "REQUIRED: '{name} Net Worth 2026: [unique hook]'. Hook = specific fact/contrast/figure from your research. Examples: 'From Debt to $8M', 'Middle-Class Joe\\'s $10M Secret', 'The $7B Truth Nobody Talks About'. FULL title must be 50-70 characters. Count carefully — do not cut off mid-word.",
   "seo_desc": "130-150 char description — must include the net worth figure and one surprising fact",
   "faq": [
     {{"question": "What is {name}'s net worth in 2026?", "answer": "2-3 sentences. Specific figure with source and context."}},
@@ -907,22 +1067,24 @@ RETURN THIS EXACT JSON STRUCTURE — every field required:
   ]
 }}
 
-CATEGORIES: {cats_list}
-WEALTH SOURCES (pick 2-4): {wealth_list}
+CATEGORIES to choose from: {cats_list}
+WEALTH SOURCES to choose from (pick 2-4 that genuinely apply): {wealth_list}
 SEO DESC ANGLE: {seo_angle}
 
-URLS RULES:
-- Must contain 3-4 REAL, WORKING URLs from credible sources
-- Use: forbes.com, bloomberg.com, opensecrets.org, ballotpedia.org, reuters.com, apnews.com, cnbc.com, businessinsider.com
-- NEVER use vertexaisearch, google.com, youtube.com, twitter.com, facebook.com, wikipedia.org
+URLS RULES — CRITICAL:
+- "urls" must contain 3-4 REAL, WORKING URLs from credible sources you actually used
+- Use: forbes.com, bloomberg.com, opensecrets.org, ballotpedia.org, reuters.com, apnews.com, cnbc.com, businessinsider.com, thestreet.com, washingtonpost.com, nytimes.com, politico.com
+- DO NOT use vertexaisearch, google.com, youtube.com, twitter.com, facebook.com, instagram.com, wikipedia.org
+- If you cannot find exact article URLs, use the homepage of the source (e.g. "https://www.forbes.com/profile/donald-trump/")
+- NEVER leave urls as ["https://...", ...] — always put real URLs
 
-⚠️ OUTPUT RULES:
-1. Start with {{ — nothing before it
+⚠️ OUTPUT RULES — CRITICAL:
+1. Start your response with {{ — nothing before it
 2. End with }} — nothing after it
-3. No markdown, no ```json
-4. net_worth must be a plain integer
-5. All 11 fields are REQUIRED
-6. FAQ must have exactly 4 items"""
+3. No markdown, no ```json, no explanations
+4. net_worth must be a plain integer (no quotes, no $ sign)
+5. All 11 fields are REQUIRED — missing any = failure. FAQ must have exactly 4 items.
+6. In the "article" field: NO HTML links or anchor tags. Use only: <p>, <h2>, <h3>, <strong>, <em>, <ul>, <li>. Links break the JSON parser."""
 
 
 # ─── WORDPRESS ───────────────────────────────────────────────────────────────
@@ -948,47 +1110,32 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
         seo_desc = seo_desc[:150].rsplit(' ', 1)[0]
 
     faq_items = data.get("faq", [])
-    
-    # ═══════════════════════════════════════════════════════════════════════════
-    # GET SOURCES FROM person_urls_master.py FIRST!
-    # ═══════════════════════════════════════════════════════════════════════════
-    person_sources = get_person_urls(name)
-    
-    if person_sources:
-        urls = person_sources
-        print(f"    Using {len(urls)} sources from person_urls_master!")
-    else:
-        urls = data.get("urls", [])
-        print(f"    Using {len(urls)} sources from Gemini")
-    
+    urls      = data.get("urls", [])
     print(f"    URLs gauta: {len(urls)}, po filtro: {len([u for u in urls if is_valid_source_url(u)])}")
 
     article_html = data.get("article", "")
     article_html = article_html.replace('\\n', ' ').replace('\\r', '').strip()
+    # Jei Gemini įdėjo FAQ į article - išimame
+    if "pnw-faq" in article_html or "Frequently Asked Questions" in article_html:
+        import re as _re
+        article_html = _re.sub(r'<div[^>]*pnw-faq[^>]*>.*?</div>\s*', '', article_html, flags=_re.DOTALL)
+        article_html = _re.sub(r'<h2[^>]*>[^<]*FAQ[^<]*</h2>.*', '', article_html, flags=_re.DOTALL | _re.IGNORECASE)
     article_with_ids, toc_html = build_toc_html(article_html)
 
     full_article = (
-        toc_html
-        + article_with_ids
+        build_article_css()
+        + toc_html
+        + f'<div class="pnw-article">{article_with_ids}</div>'
         + build_faq_html(faq_items)
         + build_references_html(urls)
     )
 
     post_num     = stats["ok"] + stats["fail"] + stats["skip"] + 1
-    
-    # ═══════════════════════════════════════════════════════════════════════════
-    # SMART SCHEDULING v4.1 - 1st post 8h, then every 2h
-    # ═══════════════════════════════════════════════════════════════════════════
-    if post_num == 1:
-        delay_minutes = 480  # 8 hours
-    else:
-        delay_minutes = 480 + ((post_num - 1) * 120)  # 8h + (N-1)*2h
-    
-    schedule_str = (datetime.now(timezone.utc) + timedelta(minutes=delay_minutes)).strftime("%Y-%m-%dT%H:%M:%S")
-    print(f"    Suplanuota: {schedule_str} (delay: {delay_minutes//60}h {delay_minutes%60}m)")
+    schedule_str = (datetime.now(timezone.utc) + timedelta(minutes=124 * post_num)).strftime("%Y-%m-%dT%H:%M:%S")
+    print(f"    Suplanuota: {schedule_str}")
 
     payload = {
-        "title":          data.get("seo_title", f"{name} Net Worth 2026")[:70],
+        "title":          data.get("seo_title", f"{name} Net Worth 2026"),
         "slug":           make_slug(name),
         "content":        full_article,
         "status":         "future",
@@ -1006,12 +1153,13 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
             "photo_url":         img_url_val or "",
         },
         "meta": {
-            "rank_math_title":         data.get("seo_title", f"{name} Net Worth 2026")[:65],
+            "rank_math_title":         data.get("seo_title", f"{name} Net Worth 2026")[:70],
             "rank_math_description":   seo_desc[:150],
             "rank_math_focus_keyword": f"{name} Net Worth 2026",
         }
     }
 
+    # Jei update - naudojame PATCH, jei naujas - POST
     for attempt in range(3):
         try:
             if post_id:
@@ -1048,8 +1196,10 @@ def run_bot(name, gemini_url):
     num = stats["ok"] + stats["fail"] + stats["skip"] + 1
     print(f"\n{'='*55}\n[{num}] {name}\n{'='*55}")
 
+    # Tikriname ar postas jau egzistuoja
     exists, post_id, post_status = check_post_exists(name)
     if exists:
+        # Tikriname ar reikia update (tušti ACF laukai ar per trumpas straipsnis)
         needs_update = False
         try:
             pr = requests.get(f"{WP_BASE_URL}/wp/v2/posts/{post_id}?acf_format=standard",
@@ -1063,7 +1213,7 @@ def run_bot(name, gemini_url):
                 title = pdata.get("title", {}).get("rendered", "")
                 faq_present   = "pnw-faq-wrap" in art
                 toc_present   = "pnw-toc" in art
-                title_has_hook = ":" in title
+                title_has_hook = ":" in title  # "Name Net Worth 2026: Hook"
                 sources_ok    = src and "http" in src
 
                 missing_info = []
@@ -1087,11 +1237,13 @@ def run_bot(name, gemini_url):
         if not needs_update:
             stats["skip"] += 1; return
 
+    # Nuotrauka
     img_id, img_url_val = None, ""
     wiki_img = get_wiki_image(name)
     if wiki_img:
         img_id, img_url_val = upload_image_to_wp(name, wiki_img)
 
+    # Gemini – iki 3 bandymų kol gauti pilnus duomenis
     data = None
     for attempt in range(3):
         if attempt > 0:
@@ -1115,16 +1267,23 @@ def run_bot(name, gemini_url):
             print(f"    JSON parse klaida: {e}")
             continue
 
+        # Papildome URLs iš grounding metadata jei JSON urls tuščias/mažas
         if grounding_urls:
             existing = parsed.get("urls", [])
             merged = existing + [u for u in grounding_urls if u not in existing]
-            parsed["urls"] = merged[:6]
+            parsed["urls"] = merged[:6]  # max 6, format_sources sutrumpins iki 4
 
         missing = check_required_fields(parsed)
         if missing:
             print(f"    Trūksta laukų: {', '.join(missing)}")
             continue
 
+        # ── URL VERIFIKACIJA: tikriname ar sources veikia, keičiame blogus ──
+        raw_urls = parsed.get("urls", [])
+        raw_urls = [u for u in raw_urls if is_valid_source_url(u)]
+        parsed["urls"] = verify_and_fix_sources(raw_urls, name=name)
+
+        # Visi laukai OK
         print(f"    ✓ Visi laukai užpildyti")
         data = parsed
         break
