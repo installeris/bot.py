@@ -39,12 +39,16 @@ BIOGUIDE_MAP = {
     "Josh Hawley": ("Josh", "Hawley", "H001089"),
     "Darrell Issa": ("Darrell Eugene", "Issa", "I000056"),
     "Ron Wyden": ("Ronald Lee", "Wyden", "W000779"),
+    "Rick Scott": ("Rick", "Scott", "S001217"),
 }
 
 stats = {"total_posts": 0, "posts_updated": 0, "urls_tested": 0, "urls_valid": 0}
 
 def extract_name_from_title(title):
-    title = re.sub(r'\s+Net Worth\s+\d{4}:.*', '', title, flags=re.IGNORECASE)
+    """Extract just the name, remove 'Net Worth 2026: ...' part"""
+    # Remove everything from "Net Worth" onwards
+    title = re.sub(r'\s*Net Worth.*', '', title, flags=re.IGNORECASE)
+    title = re.sub(r'\s*net worth.*', '', title, flags=re.IGNORECASE)
     return title.strip()
 
 def build_forbes_url(name):
@@ -73,18 +77,31 @@ def is_url_working(url, timeout=10):
     if not url:
         return False
     try:
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        }
         r = requests.get(url, timeout=timeout, headers=headers, allow_redirects=True)
+        
+        # 403 Forbidden - try retry, don't fail immediately
+        if r.status_code == 403:
+            print(f"        Retry...", end=" ")
+            time.sleep(2)
+            r = requests.get(url, timeout=timeout, headers=headers, allow_redirects=True)
+        
         if r.status_code >= 400:
             print(f"        HTTP {r.status_code}", end=" ")
             return False
+        
         content = r.text.lower()
         if any(err in content for err in ["404", "not found", "error 500", "server error"]):
             print(f"        Error page", end=" ")
             return False
+        
         if len(r.text) < 1000:
             print(f"        Too small", end=" ")
             return False
+        
         stats["urls_valid"] += 1
         print(f"        ✅", end=" ")
         return True
@@ -127,13 +144,13 @@ def build_sources_for_person(name):
     if url:
         print(f"      QuiverQuant: {url[:60]}", end=" ")
         stats["urls_tested"] += 1
-        if is_url_working(url, timeout=8):
+        if is_url_working(url, timeout=15):  # Longer timeout for Quiver
             sources.append(url)
             print()
         else:
             print()
     else:
-        print(f"      QuiverQuant: (not congress member - skipped)")
+        print(f"      QuiverQuant: (no bioguide - skipping)")
     
     print(f"  Result: {len(sources)} working sources")
     return sources
