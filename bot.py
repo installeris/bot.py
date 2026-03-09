@@ -672,6 +672,15 @@ _URL_CHECK_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
+def is_valid_source_url(url):
+    url = url.strip()
+    if not url or not url.startswith("http"):
+        return False
+    for blocked in BLOCKED_URL_PATTERNS:
+        if blocked in url:
+            return False
+    return True
+
 def check_url_alive(url, timeout=10):
     """
     Tikrina ar URL egzistuoja.
@@ -792,15 +801,6 @@ def verify_and_fix_sources(urls, name=""):
     print(f"    [sources] Galutinis skaičius: {len(verified)} šaltiniai")
     return verified[:4]
 
-
-
-    url = url.strip()
-    if not url or not url.startswith("http"):
-        return False
-    for blocked in BLOCKED_URL_PATTERNS:
-        if blocked in url:
-            return False
-    return True
 
 def format_sources(urls, name=""):
     seen = set()
