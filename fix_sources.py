@@ -1,27 +1,81 @@
 #!/usr/bin/env python3
 """
-Fix WordPress Sources v12.0 - FINAL
-- Update ACF sources
-- Update HTML references section - SAME URLs as ACF!
+Fix WordPress Sources v14.0 - FINAL
+- Uses build_references_html() from bot.py
+- Updates BOTH ACF sources + HTML references
 """
 
 import os, requests, json, re, time, sys
+from datetime import datetime
 from person_urls_master import PERSON_URLS
 
 sys.stdout.reconfigure(line_buffering=True)
 
-print("=== FIX WORDPRESS SOURCES v12.0 (Update BOTH ACF + HTML References) ===\n")
+print("=== FIX WORDPRESS SOURCES v14.0 (Using bot.py references) ===\n")
 
 WP_USER = os.getenv("WP_USERNAME")
 WP_PASS = os.getenv("WP_APP_PASS")
 WP_BASE_URL = "https://politiciannetworth.com/wp-json"
 WP_TIMEOUT = 30
 
-stats = {"total_posts": 0, "posts_updated": 0, "posts_skipped": 0, "acf_updated": 0, "html_updated": 0}
+stats = {"total_posts": 0, "posts_updated": 0, "acf_updated": 0, "html_updated": 0, "html_created": 0}
 
 def extract_name_from_title(title):
     title = re.sub(r'\s*Net Worth.*', '', title, flags=re.IGNORECASE).strip()
     return title
+
+def is_valid_source_url(url):
+    """From bot.py"""
+    url = url.strip()
+    if not url or not url.startswith("http"):
+        return False
+    blocked = ["vertexaisearch", "googleapis.com", "google.com/search",
+               "gstatic.com", "googleusercontent.com", "youtube.com/watch",
+               "twitter.com", "x.com/", "facebook.com", "instagram.com", "tiktok.com",
+               "reddit.com", "wikipedia.org"]
+    for b in blocked:
+        if b in url:
+            return False
+    return True
+
+def build_references_html(urls):
+    """Exact copy from bot.py"""
+    month_year = datetime.now().strftime("%B %Y")
+    label_map = {
+        "opensecrets.org": "OpenSecrets – Personal Finances",
+        "ballotpedia.org": "Ballotpedia – Political Biography",
+        "disclosures-clerk.house.gov": "U.S. House Financial Disclosures",
+        "quiverquant.com": "Quiver Quantitative – Congress Trading",
+        "senate.gov": "U.S. Senate – Official Profile",
+        "house.gov": "U.S. House – Official Profile",
+        "forbes.com": "Forbes – Wealth Estimate",
+        "reuters.com": "Reuters", "apnews.com": "AP News",
+        "celebrity": "Celebrity Net Worth",
+        "cnbc.com": "CNBC", "businessinsider.com": "Business Insider",
+        "thestreet.com": "The Street", "washingtonpost.com": "Washington Post",
+    }
+    items = []
+    seen_domains = set()
+    for url in urls:
+        if not is_valid_source_url(url):
+            continue
+        domain = re.sub(r"https?://(www\.)?", "", url).split("/")[0]
+        if domain in seen_domains:
+            continue
+        seen_domains.add(domain)
+        label = next((v for k, v in label_map.items() if k in domain), domain)
+        items.append(f'<li><a href="{url}" target="_blank" rel="nofollow noopener">{label}</a></li>')
+        if len(items) >= 4:
+            break
+    if not items:
+        return ""
+    return f"""
+<hr style="margin:40px 0 20px">
+<div class="references-section">
+<h2>References &amp; Sources</h2>
+<p><em>Last updated: {month_year}. Net worth estimates are based on public financial disclosures and independent research.</em></p>
+<ul>{"".join(items)}</ul>
+</div>"""
 
 def get_all_posts(page=1):
     try:
@@ -35,8 +89,7 @@ def get_all_posts(page=1):
             total_pages = int(res.headers.get("X-WP-TotalPages", 1))
             return res.json(), total_pages
         return [], 1
-    except Exception as e:
-        print(f"  Error: {e}")
+    except:
         return [], 1
 
 def get_post_full(post_id):
@@ -50,43 +103,28 @@ def update_post(post_id, payload):
     try:
         res = requests.post(f"{WP_BASE_URL}/wp/v2/posts/{post_id}", json=payload, auth=(WP_USER, WP_PASS), timeout=WP_TIMEOUT)
         return res.status_code == 200
-    except Exception as e:
-        print(f"    Update error: {e}")
+    except:
         return False
 
-def update_html_references(html_content, sources):
+def update_html_with_references(html_content, urls):
     """
-    Update HTML references section - REPLACE OLD with NEW
-    Find: <div class="references-section">...old list...</div>
-    Replace with: <div class="references-section">...new list...</div>
+    Remove old references-section and add new one from build_references_html()
     """
-    if not sources or "references-section" not in html_content:
+    if not urls:
         return html_content, False
     
-    # Build new reference list
-    new_items = []
-    for source in sources:
-        new_items.append(f'<li><a href="{source["url"]}" target="_blank" rel="nofollow noopener">{source["label"]}</a></li>')
+    new_references = build_references_html(urls)
+    if not new_references:
+        return html_content, False
     
-    new_list = "\n".join(new_items)
+    # Remove old references-section if exists
+    pattern = r'<hr[^>]*>[\s\n]*<div class="references-section">.*?</div>'
+    new_html = re.sub(pattern, '', html_content, flags=re.DOTALL | re.IGNORECASE)
     
-    # Find entire references-section and replace
-    ref_pattern = r'<div class="references-section">.*?</div>'
+    # Add new references at end
+    new_html = new_html.rstrip() + "\n\n" + new_references
     
-    if re.search(ref_pattern, html_content, re.DOTALL | re.IGNORECASE):
-        # Found references-section - replace it
-        new_section = f'''<div class="references-section">
-<h3>References & Sources</h3>
-<p>Last updated: March 2026. Net worth estimates are based on public financial disclosures and independent research.</p>
-<ul>
-{new_list}
-</ul>
-</div>'''
-        
-        new_html = re.sub(ref_pattern, new_section, html_content, flags=re.DOTALL | re.IGNORECASE)
-        return new_html, new_html != html_content
-    
-    return html_content, False
+    return new_html, new_html != html_content
 
 def process_post(post_data):
     post_id = post_data.get("id")
@@ -107,44 +145,44 @@ def process_post(post_data):
     # Get URLs for this person
     if name not in PERSON_URLS:
         print(f"  ⚠️ No data - SKIPPING")
-        stats["posts_skipped"] += 1
         return
     
     sources = PERSON_URLS[name]
     if not sources:
         print(f"  ❌ No sources - SKIPPING")
-        stats["posts_skipped"] += 1
         return
     
     print(f"  🔗 {len(sources)} sources")
     
-    acf_ok = False
-    html_ok = False
+    updated = False
     
     # 1. Update ACF sources
-    print(f"  📝 Updating ACF...", end=" ")
+    print(f"  📝 ACF...", end=" ")
     acf_sources = "\n".join([s["url"] for s in sources])
     if update_post(post_id, {"acf": {"sources": acf_sources}}):
-        print(f"✅")
+        print(f"✅", end=" ")
         stats["acf_updated"] += 1
-        acf_ok = True
+        updated = True
     else:
-        print(f"❌")
+        print(f"❌", end=" ")
     
-    # 2. Update HTML references
-    print(f"  📄 Updating HTML...", end=" ")
-    new_html, changed = update_html_references(html_content, sources)
+    # 2. Update HTML references using bot.py function
+    print(f"HTML...", end=" ")
+    urls = [s["url"] for s in sources]
+    new_html, changed = update_html_with_references(html_content, urls)
     if changed:
         if update_post(post_id, {"content": new_html}):
-            print(f"✅")
+            print(f"✅ UPDATED", end=" ")
             stats["html_updated"] += 1
-            html_ok = True
+            updated = True
         else:
-            print(f"❌")
+            print(f"❌", end=" ")
     else:
-        print(f"⚠️ No refs section")
+        print(f"⚠️", end=" ")
     
-    if acf_ok or html_ok:
+    print()
+    
+    if updated:
         stats["posts_updated"] += 1
         print(f"  ✅ UPDATED")
 
@@ -170,13 +208,12 @@ def main():
         page += 1
     
     print(f"\n\n{'='*70}")
-    print(f"✅ FINAL RESULTS (v12.0):")
+    print(f"✅ FINAL RESULTS (v14.0):")
     print(f"{'='*70}")
     print(f"📊 Total posts: {stats['total_posts']}")
-    print(f"✅ ACF updated: {stats['acf_updated']}")
-    print(f"✅ HTML updated: {stats['html_updated']}")
-    print(f"✅ Total updated: {stats['posts_updated']}")
-    print(f"⚠️ Skipped: {stats['posts_skipped']}")
+    print(f"✅ Posts updated: {stats['posts_updated']}")
+    print(f"  📝 ACF updated: {stats['acf_updated']}")
+    print(f"  📄 HTML updated: {stats['html_updated']}")
     print(f"{'='*70}")
 
 if __name__ == "__main__":
