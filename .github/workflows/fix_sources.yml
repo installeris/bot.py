@@ -1,0 +1,45 @@
+name: Fix WordPress Sources URLs
+description: "Validuoja ir fiksuoja sulaužytas šaltinių nuorodas WordPress"
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run without updating (check only)"
+        required: false
+        default: "false"
+  schedule:
+    # Kiekprogramėlę dieną 2AM UTC (4AM Lithuania)
+    - cron: "0 2 * * *"
+
+jobs:
+  fix-sources:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      
+      - name: Install dependencies
+        run: |
+          pip install requests
+      
+      - name: Fix WordPress Sources
+        env:
+          PYTHONUNBUFFERED: "1"
+          WP_USERNAME: ${{ secrets.WP_USERNAME }}
+          WP_APP_PASS: ${{ secrets.WP_APP_PASS }}
+        run: |
+          python3 fix_sources.py
+      
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: fix-sources-logs
+          path: fix_sources_*.log
+          retention-days: 7
