@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """
-Fix WordPress Sources v10.1 (Master URLs) - FINAL
-- Uses person_urls_research.py data
-- Updates ALL posts
-- BOTH ACF sources + HTML references
+Fix WordPress Sources v12.0 - FINAL
+- Update ACF sources
+- Update HTML references section - SAME URLs as ACF!
 """
 
 import os, requests, json, re, time, sys
@@ -11,14 +10,14 @@ from person_urls_master import PERSON_URLS
 
 sys.stdout.reconfigure(line_buffering=True)
 
-print("=== FIX WORDPRESS SOURCES v10.1 (Master URLs) (FINAL - ALL Posts) ===\n")
+print("=== FIX WORDPRESS SOURCES v12.0 (Update BOTH ACF + HTML References) ===\n")
 
 WP_USER = os.getenv("WP_USERNAME")
 WP_PASS = os.getenv("WP_APP_PASS")
 WP_BASE_URL = "https://politiciannetworth.com/wp-json"
 WP_TIMEOUT = 30
 
-stats = {"total_posts": 0, "posts_updated": 0, "posts_skipped": 0}
+stats = {"total_posts": 0, "posts_updated": 0, "posts_skipped": 0, "acf_updated": 0, "html_updated": 0}
 
 def extract_name_from_title(title):
     title = re.sub(r'\s*Net Worth.*', '', title, flags=re.IGNORECASE).strip()
@@ -37,7 +36,7 @@ def get_all_posts(page=1):
             return res.json(), total_pages
         return [], 1
     except Exception as e:
-        print(f"  Error getting posts: {e}")
+        print(f"  Error: {e}")
         return [], 1
 
 def get_post_full(post_id):
@@ -56,22 +55,35 @@ def update_post(post_id, payload):
         return False
 
 def update_html_references(html_content, sources):
-    """Update HTML references section"""
+    """
+    Update HTML references section - REPLACE OLD with NEW
+    Find: <div class="references-section">...old list...</div>
+    Replace with: <div class="references-section">...new list...</div>
+    """
     if not sources or "references-section" not in html_content:
         return html_content, False
     
+    # Build new reference list
     new_items = []
     for source in sources:
         new_items.append(f'<li><a href="{source["url"]}" target="_blank" rel="nofollow noopener">{source["label"]}</a></li>')
     
     new_list = "\n".join(new_items)
     
-    # Find <ul>...</ul> in references section
-    ref_pattern = r'(<div class="references-section">.*?<ul>)(.*?)(</ul>)'
-    match = re.search(ref_pattern, html_content, re.DOTALL | re.IGNORECASE)
+    # Find entire references-section and replace
+    ref_pattern = r'<div class="references-section">.*?</div>'
     
-    if match:
-        new_html = html_content[:match.start(2)] + new_list + html_content[match.end(2):]
+    if re.search(ref_pattern, html_content, re.DOTALL | re.IGNORECASE):
+        # Found references-section - replace it
+        new_section = f'''<div class="references-section">
+<h3>References & Sources</h3>
+<p>Last updated: March 2026. Net worth estimates are based on public financial disclosures and independent research.</p>
+<ul>
+{new_list}
+</ul>
+</div>'''
+        
+        new_html = re.sub(ref_pattern, new_section, html_content, flags=re.DOTALL | re.IGNORECASE)
         return new_html, new_html != html_content
     
     return html_content, False
@@ -94,7 +106,7 @@ def process_post(post_data):
     
     # Get URLs for this person
     if name not in PERSON_URLS:
-        print(f"  ⚠️ No data found - SKIPPING")
+        print(f"  ⚠️ No data - SKIPPING")
         stats["posts_skipped"] += 1
         return
     
@@ -104,22 +116,37 @@ def process_post(post_data):
         stats["posts_skipped"] += 1
         return
     
-    print(f"  🔗 Found {len(sources)} sources")
-    print(f"  📤 Updating...")
+    print(f"  🔗 {len(sources)} sources")
     
-    # Update ACF
+    acf_ok = False
+    html_ok = False
+    
+    # 1. Update ACF sources
+    print(f"  📝 Updating ACF...", end=" ")
     acf_sources = "\n".join([s["url"] for s in sources])
     if update_post(post_id, {"acf": {"sources": acf_sources}}):
-        print(f"    ✅ ACF updated")
+        print(f"✅")
+        stats["acf_updated"] += 1
+        acf_ok = True
+    else:
+        print(f"❌")
     
-    # Update HTML
+    # 2. Update HTML references
+    print(f"  📄 Updating HTML...", end=" ")
     new_html, changed = update_html_references(html_content, sources)
     if changed:
         if update_post(post_id, {"content": new_html}):
-            print(f"    ✅ HTML updated")
+            print(f"✅")
+            stats["html_updated"] += 1
+            html_ok = True
+        else:
+            print(f"❌")
+    else:
+        print(f"⚠️ No refs section")
     
-    stats["posts_updated"] += 1
-    print(f"  ✅ UPDATED")
+    if acf_ok or html_ok:
+        stats["posts_updated"] += 1
+        print(f"  ✅ UPDATED")
 
 def main():
     print(f"🔍 Scanning ALL posts...\n")
@@ -143,10 +170,12 @@ def main():
         page += 1
     
     print(f"\n\n{'='*70}")
-    print(f"✅ FINAL RESULTS (v10.1 (Master URLs)):")
+    print(f"✅ FINAL RESULTS (v12.0):")
     print(f"{'='*70}")
     print(f"📊 Total posts: {stats['total_posts']}")
-    print(f"✅ Updated: {stats['posts_updated']}")
+    print(f"✅ ACF updated: {stats['acf_updated']}")
+    print(f"✅ HTML updated: {stats['html_updated']}")
+    print(f"✅ Total updated: {stats['posts_updated']}")
     print(f"⚠️ Skipped: {stats['posts_skipped']}")
     print(f"{'='*70}")
 
