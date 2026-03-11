@@ -1,0 +1,33 @@
+name: Restore Post Revisions
+
+on:
+  workflow_dispatch:
+    inputs:
+      damaged_after:
+        description: 'Postai sugadinti po (UTC laikas, pvz: 2026-03-11T04:36:00)'
+        required: true
+        default: '2026-03-11T04:36:00'
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run restore script
+        env:
+          WP_USERNAME: ${{ secrets.WP_USERNAME }}
+          WP_APP_PASS: ${{ secrets.WP_APP_PASS }}
+        run: |
+          # Pakeičiame laiką jei nurodytas kitoks
+          DAMAGED_AFTER="${{ github.event.inputs.damaged_after }}"
+          sed -i "s|DAMAGED_AFTER_UTC = \".*\"|DAMAGED_AFTER_UTC = \"${DAMAGED_AFTER}\"|" restore_revisions.py
+          python restore_revisions.py
