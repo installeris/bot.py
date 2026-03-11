@@ -892,18 +892,11 @@ def build_article_css():
 
 def build_faq_html(faq_items):
     if not faq_items: return ""
-    schema = json.dumps({
-        "@context": "https://schema.org", "@type": "FAQPage",
-        "mainEntity": [{"@type": "Question", "name": i["question"],
-                         "acceptedAnswer": {"@type": "Answer", "text": i["answer"]}}
-                        for i in faq_items]
-    }, ensure_ascii=False)
     items_html = "".join(
         f'<div class="pnw-faq-item"><div class="pnw-faq-q">{i["question"]}</div>'
         f'<div class="pnw-faq-a">{i["answer"]}</div></div>'
         for i in faq_items)
     return f"""
-<script type="application/ld+json">{schema}</script>
 <div class="pnw-faq-wrap">
 <h2 class="pnw-faq-title">Frequently Asked Questions</h2>
 {items_html}
@@ -1257,9 +1250,9 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
     print(f"    Suplanuota: {schedule_str}")
 
     payload = {
-        "title":          data.get("seo_title", f"{name} Net Worth 2026"),
+        "title":          {"raw": data.get("seo_title", f"{name} Net Worth 2026")},
         "slug":           make_slug(name),
-        "content":        full_article,
+        "content":        {"raw": full_article},
         "status":         "future",
         "date":           schedule_str,
         "author":         AUTHOR_ID,
@@ -1278,6 +1271,18 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
             "rank_math_title":         data.get("seo_title", f"{name} Net Worth 2026"),
             "rank_math_description":   seo_desc[:155],
             "rank_math_focus_keyword": f"{name} Net Worth 2026",
+            "rank_math_schema_data":   json.dumps({
+                "@context": "https://schema.org",
+                "@type": "FAQPage",
+                "mainEntity": [
+                    {
+                        "@type": "Question",
+                        "name": i["question"],
+                        "acceptedAnswer": {"@type": "Answer", "text": i["answer"]}
+                    }
+                    for i in faq_items
+                ]
+            }, ensure_ascii=False),
         }
     }
 
