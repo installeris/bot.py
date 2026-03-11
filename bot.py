@@ -488,9 +488,15 @@ def validate_net_worth(name, net_worth_int):
         print(f"    ⚠️ NW=0, naudojame žinomą: {known:,}")
         return known
     ratio = net_worth_int / known
-    if ratio > 2.5 or ratio < 0.3:
-        print(f"    ⚠️ NW {net_worth_int:,} neatitinka žinomo {known:,} (ratio={ratio:.1f}x) → naudojame žinomą")
+    # Jei Gemini grąžino DAUGIAU nei žinomas — gali būti naujesnė info, leidžiame (iki 5x)
+    if ratio > 5.0:
+        print(f"    ⚠️ NW {net_worth_int:,} per daug viršija žinomą {known:,} (ratio={ratio:.1f}x) → naudojame žinomą")
         return known
+    # Jei grąžino DAUG MAŽIAU nei žinomas — tikėtina sena/klaidinga info
+    if ratio < 0.2:
+        print(f"    ⚠️ NW {net_worth_int:,} per mažas lyginant su žinomu {known:,} (ratio={ratio:.1f}x) → naudojame žinomą")
+        return known
+    # Priimame Gemini reikšmę — ji gali būti naujesnė
     return net_worth_int
 
 
@@ -506,6 +512,11 @@ def check_required_fields(data):
     hist = data.get("history", "")
     if not hist or "INT" in hist or hist.count(":") < 1:
         missing.append("history tuščia arba placeholder")
+    elif hist.count(":") >= 2:
+        # Tikriname ar flat (visos reikšmės vienodos)
+        vals = [p.split(":")[1] for p in hist.split(",") if ":" in p]
+        if len(set(vals)) == 1 and len(vals) > 1:
+            missing.append("history flat — visi metai vienodi, reikia skirtingų metų duomenų")
     if not str(data.get("job_title", "")).strip():
         missing.append("job_title tuščias")
     # faq - jei mažiau nei 4, papildome
@@ -1108,23 +1119,34 @@ Structure: opening hook ({intro_style.split(':')[0].replace('START WITH A ', '')
     return f"""You are a financial reporter writing for a general audience. Write a unique, well-researched profile of {name}'s finances.
 
 CRITICAL — NET WORTH ACCURACY:
-1. Search RIGHT NOW: "{name} net worth 2026" + "{name} net worth site:forbes.com OR site:bloomberg.com OR site:celebritynetworth.com"
-2. Use the figure that appears MOST OFTEN across credible sources. Do not invent or average.
-3. Use the MOST COMMONLY REPORTED net worth figure — even if it includes controlled assets:
-   - Ali Khamenei: most sources cite ~$95 billion (Setad empire) → net_worth = 95000000000
-   - Donald Trump: Forbes 2025 cites ~$7.3B → net_worth = 7300000000
-   - Kamala Harris: OpenSecrets/Forbes cite ~$8M → net_worth = 8000000
-   - Barack Obama: Celebrity Net Worth cites ~$70M → net_worth = 70000000
-4. NEVER invent a figure. If sources conflict, use the LOWER credible estimate.
-5. "history" RULES — VERIFIED DATA ONLY:
-   - Search: "{name} net worth [year]" for 2015, 2018, 2020, 2022, 2024, 2026
-   - ONLY include years where you find an actual cited figure from Forbes, Bloomberg, OpenSecrets, or similar
-   - If you can't verify a year — SKIP IT. Do not guess, do not interpolate.
-   - 2-3 real data points is better than 6 invented ones
-   - Values MUST differ year to year — if all sources give same figure, only include the most recent
+1. Search RIGHT NOW in this exact order:
+   a) "{name} net worth 2026"
+   b) "{name} net worth 2025"
+   c) "{name} net worth site:forbes.com OR site:opensecrets.org OR site:celebritynetworth.com"
+2. ALWAYS use the MOST RECENT figure available — a 2025/2026 estimate beats a 2020 figure every time.
+3. If sources conflict, use the MOST RECENT credible source — NOT the lowest.
+   - OpenSecrets shows official disclosure data (often outdated/underreported)
+   - Forbes/CelebrityNetWorth estimate total wealth including unreported assets
+   - PREFER Forbes/CelebrityNetWorth for total net worth — they reflect current reality
+4. NEVER use old congressional disclosure figures as the final number if newer estimates exist.
+   - Example: Schumer's 2020 disclosure showed ~$900K but 2025 estimates put him at $6-7M
+   - Always search for the latest estimate, not just the official disclosure
+5. NEVER invent a figure. If genuinely no data exists, use the most recent credible estimate.
+
+5. "history" — SEARCH FOR HISTORICAL NET WORTH DATA:
+   Before writing history, run these searches RIGHT NOW:
+   - "{name} net worth 2015 OR 2016 OR 2017"
+   - "{name} net worth 2018 OR 2019 OR 2020"
+   - "{name} net worth 2021 OR 2022 OR 2023 OR 2024"
+   - "{name} net worth opensecrets.org"
+   Then fill "history" ONLY with years where you found a real cited number.
+   Rules:
+   - ONLY include years with an actual cited figure (Forbes, Bloomberg, OpenSecrets, CelebrityNetWorth)
+   - SKIP any year you cannot verify — 2 real points beats 6 guesses
+   - Values must differ across years — same number repeated = do not include
    - Last entry MUST equal net_worth exactly
-   - GOOD: "2018:1500000,2022:3000000,2026:8000000" (3 verified points, clearly different)
-   - BAD: "2015:10000000,2016:10000000,2017:10000000" (repeated = invented)
+   - GOOD: "2018:1500000,2022:3000000,2026:7000000"
+   - BAD: "2020:7000000,2026:7000000" (only 1 unique value — just use the last entry)
 
 WRITING RULES — READ EVERY LINE:
 - Article MUST be {word_target} words
