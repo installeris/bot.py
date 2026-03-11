@@ -44,7 +44,7 @@ def get_all_posts_modified_after(dt_str):
             timeout=WP_TIMEOUT,
         )
         if r.status_code == 400:
-            break  # nėra daugiau puslapių
+            break
         if r.status_code != 200:
             print(f"  Klaida gaunant postus: {r.status_code} {r.text[:200]}")
             break
@@ -52,8 +52,9 @@ def get_all_posts_modified_after(dt_str):
         if not batch:
             break
         posts.extend(batch)
-        print(f"  Puslapis {page}: rasta {len(batch)} postų")
-        if len(batch) < 100:
+        total_pages = int(r.headers.get("X-WP-TotalPages", 1))
+        print(f"  Puslapis {page}/{total_pages}: rasta {len(batch)} postų")
+        if page >= total_pages:
             break
         page += 1
     print(f"  Iš viso rasta: {len(posts)} sugadintų postų\n")
@@ -128,14 +129,15 @@ def restore_all():
 
         revisions = get_revisions(post_id)
 
-        if good_rev is None:
-            print(f"    ✗ Nerasta revisija prieš {DAMAGED_AFTER_UTC} — nėra ko grąžinti")
+        good_rev = None
+
+        if not revisions:
+            print(f"    ✗ Nėra revisijų — nėra ko grąžinti")
             skip_count += 1
             continue
 
         # Revisijos surūšiuotos desc — ieškome pirmos PRIEŠ sugadinimo laiką
         damage_dt = datetime.fromisoformat(DAMAGED_AFTER_UTC).replace(tzinfo=timezone.utc)
-        good_rev = None
         for rev in revisions:
             rev_date_str = rev.get("date_gmt") or rev.get("date", "")
             try:
@@ -144,12 +146,17 @@ def restore_all():
                     rev_dt = rev_dt.replace(tzinfo=timezone.utc)
                 if rev_dt < damage_dt:
                     good_rev = rev
-                    break  # pirmoji (naujausia) revisija prieš sugadinimą
+                    break
             except Exception:
                 continue
-        rev_id     = good_rev.get("id")
-        rev_date   = good_rev.get("date", "?")[:16]
-        rev_author = good_rev.get("author", "?")
+
+        if good_rev is None:
+            print(f"    ✗ Nerasta revisija prieš {DAMAGED_AFTER_UTC} — praleisti")
+            skip_count += 1
+            continue
+
+        rev_id   = good_rev.get("id")
+        rev_date = good_rev.get("date", "?")[:16]
 
         print(f"    Grąžiname į revisiją ID:{rev_id} ({rev_date})")
 
