@@ -1250,8 +1250,10 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
         + build_references_html(urls)
     )
 
-    post_num     = stats["ok"] + stats["fail"] + stats["skip"] + 1
-    schedule_str = (datetime.now(timezone.utc) + timedelta(minutes=124 * post_num)).strftime("%Y-%m-%dT%H:%M:%S")
+    # 1-as postas po 1 valandos, kiekvienas kitas kas 5 valandas po jo
+    post_num     = stats["ok"] + stats["fail"] + stats["skip"]  # 0-based
+    delay_minutes = 60 + (300 * post_num)  # 1h + 5h * kiekvienas kitas
+    schedule_str = (datetime.now(timezone.utc) + timedelta(minutes=delay_minutes)).strftime("%Y-%m-%dT%H:%M:%S")
     print(f"    Suplanuota: {schedule_str}")
 
     payload = {
