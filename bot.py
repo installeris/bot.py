@@ -125,6 +125,7 @@ KNOWN_NET_WORTHS = {
     "John Kerry":                 250000000,   # Teresa Heinz turtas
     "Mitch McConnell":            35000000,
     "Paul Ryan":                  9000000,
+    "Bruce Rauner":               400000000,   # Forbes/Wikipedia/BI konsensusas ~$400M, ne $1B
     # Nauji 2026-03-09
     "Rich McCormick":             1000000,    # GA kongresistas, ~$1M
     "Mark Green":                 4000000,    # TN kongresistas, ~$4M
@@ -1133,20 +1134,21 @@ CRITICAL — NET WORTH ACCURACY:
    - Always search for the latest estimate, not just the official disclosure
 5. NEVER invent a figure. If genuinely no data exists, use the most recent credible estimate.
 
-5. "history" — SEARCH FOR HISTORICAL NET WORTH DATA:
-   Before writing history, run these searches RIGHT NOW:
-   - "{name} net worth 2015 OR 2016 OR 2017"
-   - "{name} net worth 2018 OR 2019 OR 2020"
-   - "{name} net worth 2021 OR 2022 OR 2023 OR 2024"
-   - "{name} net worth opensecrets.org"
-   Then fill "history" ONLY with years where you found a real cited number.
-   Rules:
-   - ONLY include years with an actual cited figure (Forbes, Bloomberg, OpenSecrets, CelebrityNetWorth)
-   - SKIP any year you cannot verify — 2 real points beats 6 guesses
-   - Values must differ across years — same number repeated = do not include
+5. "history" — ONLY CONFIRMED CITED FIGURES:
+   Run these searches now:
+   - "{name} net worth 2015 OR 2016 OR 2017 site:forbes.com OR site:opensecrets.org OR site:celebritynetworth.com"
+   - "{name} net worth 2018 OR 2019 OR 2020 site:forbes.com OR site:opensecrets.org OR site:celebritynetworth.com"
+   - "{name} net worth 2021 OR 2022 OR 2023 OR 2024 site:forbes.com OR site:opensecrets.org OR site:celebritynetworth.com"
+
+   STRICT RULES — zero tolerance:
+   - ONLY include a year if a credible source cited a SPECIFIC number for that exact year
+   - Range = skip. "approximately $400M-$1B" → DO NOT include. Pick the most cited single figure or skip.
+   - Speculation = skip. "estimated to be around" without a source = DO NOT include
+   - Interpolation = skip. Do not calculate what net worth "must have been" between two data points
+   - 1 verified point beats 5 guesses — every time
+   - Net worth CAN decrease year to year — include as-is, do not smooth it out
    - Last entry MUST equal net_worth exactly
-   - GOOD: "2018:1500000,2022:3000000,2026:7000000"
-   - BAD: "2020:7000000,2026:7000000" (only 1 unique value — just use the last entry)
+   - If NO historical data found → just: "2026:{net_worth}"
 
 WRITING RULES — READ EVERY LINE:
 - Article MUST be {word_target} words
@@ -1154,25 +1156,24 @@ WRITING RULES — READ EVERY LINE:
 - ONLY verified real facts — no invented numbers
 - Use specific numbers: "$47,000 Senate salary" not "congressional salary"
 - Include 3+ facts most people genuinely don't know about this person's finances
-- Write like a sharp magazine journalist — not a blogger, not a textbook
+- Write like a New York Times or Wall Street Journal feature — not a blog post, not Wikipedia
 
-SENTENCE RULES — CRITICAL FOR READABILITY SCORE:
-- Maximum sentence length: 20 words. Count them. Cut anything longer in half.
-- Vary sentence length constantly: long, short, medium, very short. "That's it." is a valid sentence.
-- After every 2-3 longer sentences, write one 5-word-or-fewer sentence. It creates rhythm.
-- Never stack two long sentences back to back.
-- Paragraphs: maximum 2 sentences. Never 3. White space is your friend.
-- Use contractions: "he's", "it's", "didn't", "wasn't", "that's" — never "he is", "it is"
-- Start some sentences with "And", "But", "So", "Yet" — it's fine, it reads naturally
-- Ask a question every 400-500 words — it pulls readers back in
+SENTENCE & RHYTHM RULES:
+- Mix sentence lengths naturally — no pattern, no formula. Some sentences run long and complex, pulling the reader through a chain of thought. Others stop cold. Like this.
+- Use em-dashes to extend a thought — or add a parenthetical aside (the kind that feels like a whispered aside) — without breaking momentum
+- Rhetorical questions are your friend. Does anyone actually believe he earned that on a senator's salary?
+- Never stack two similar-length sentences back to back. Break the rhythm on purpose.
+- Paragraphs: 1-3 sentences. Vary it. A one-sentence paragraph can hit harder than three.
+- Use contractions naturally: "he's", "it's", "didn't", "wasn't", "that's"
+- Start sentences with "And", "But", "So", "Yet" when it feels right — it does
+- Transitions should feel earned, not mechanical. No "Furthermore." No "In addition." Just write the next thought.
 
 VOCABULARY RULES:
-- Use simple, everyday words. If there's a shorter word, use it.
-- "buy" not "purchase". "use" not "utilize". "get" not "obtain". "start" not "commence".
-- Mix in occasional informal phrases: "turns out", "here's the thing", "not bad", "worth a look"
-- Never use passive voice: "he earned $2M" not "a salary of $2M was earned"
-- Active verbs only: "bought", "sold", "built", "lost", "made", "won"
-- Refer to the person by first name after the first mention — "Nancy" not "Pelosi"
+- Simple words win. "buy" not "purchase". "use" not "utilize". "start" not "commence".
+- Occasional informal phrases add texture: "turns out", "here's the thing", "not exactly pocket change"
+- Active voice always: "he bought", "she built", "they lost" — never passive constructions
+- Refer to the person by first name after first mention — "Nancy" not "Pelosi"
+- Specific beats vague: "$2.3 million condo in Brooklyn" not "real estate holdings"
 
 BANNED WORDS AND PHRASES — AUTOMATIC FAILURE if used:
 "it's worth noting", "delve into", "in conclusion", "moreover", "furthermore",
@@ -1212,11 +1213,10 @@ FAQ RULES — ALL 4 ARE REQUIRED, no exceptions:
 - Use the exact net worth figure in FAQ answer #1
 - No filler phrases in answers — every word must add information
 
-READABILITY TARGET: Aim for Flesch Reading Ease score of 65-75. That means:
-- Average sentence: 15 words or fewer
-- Average syllables per word: under 1.5
-- Lots of short paragraphs and sentence variety
-- Test yourself: could a high school student understand every sentence?
+READABILITY TARGET: NYT/WSJ feature style — sophisticated but accessible.
+- Vary sentence length deliberately. Short punches. Then longer, more textured sentences that build context.
+- A high school student should understand every word. A finance editor should find it credible.
+- No robotic rhythm. Read it back. If it sounds like a template, rewrite it.
 
 RETURN THIS EXACT JSON STRUCTURE — every field required:
 {{
