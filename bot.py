@@ -1148,7 +1148,7 @@ CRITICAL — NET WORTH ACCURACY:
    - 1 verified point beats 5 guesses — every time
    - Net worth CAN decrease year to year — include as-is, do not smooth it out
    - Last entry MUST equal net_worth exactly
-   - If NO historical data found → just: "2026:{net_worth}"
+   - If NO historical data found → just: "2026:{{net_worth}}"
 
 WRITING RULES — READ EVERY LINE:
 - Article MUST be {word_target} words
