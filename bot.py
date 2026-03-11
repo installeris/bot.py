@@ -459,20 +459,34 @@ def extract_text_from_gemini(res):
         # Vietoj to imsime iš Gemini JSON "urls" lauko arba generuosime iš webSearchQueries
 
         # Su google_search Gemini gali grąžinti: [search_results_text, json_text]
+        # JSON visada būna PASKUTINIS — ieškome iš galo
         json_text = None
         for part in reversed(text_parts):
-            if part.startswith("{"):
-                json_text = part
+            stripped = part.strip()
+            if stripped.startswith("{"):
+                json_text = stripped
                 print(f"    Rastas JSON part ({len(json_text)} chars)")
                 break
 
         if not json_text:
-            brace = full_text.find("{")
-            if brace != -1:
-                json_text = full_text[brace:]
-                print(f"    JSON rasta pozicijoje {brace}")
+            # Ieškome paskutinio { kuris atrodo kaip JSON objekto pradžia
+            # Einame per full_text iš galo
+            last_brace = full_text.rfind('{"article"')
+            if last_brace == -1:
+                last_brace = full_text.rfind('{\n  "article"')
+            if last_brace == -1:
+                last_brace = full_text.rfind('{\n"article"')
+            if last_brace != -1:
+                json_text = full_text[last_brace:]
+                print(f"    JSON rasta iš galo pozicijoje {last_brace}")
             else:
-                return None, grounding_urls, f"nera JSON: {full_text[:150]}"
+                # Paskutinis fallback — pirmasis {
+                brace = full_text.find("{")
+                if brace != -1:
+                    json_text = full_text[brace:]
+                    print(f"    JSON rasta pozicijoje {brace} (fallback)")
+                else:
+                    return None, grounding_urls, f"nera JSON: {full_text[:150]}"
 
         return json_text, grounding_urls, None
     except Exception as e:
@@ -513,11 +527,6 @@ def check_required_fields(data):
     hist = data.get("history", "")
     if not hist or "INT" in hist or hist.count(":") < 1:
         missing.append("history tuščia arba placeholder")
-    elif hist.count(":") >= 2:
-        # Tikriname ar flat (visos reikšmės vienodos)
-        vals = [p.split(":")[1] for p in hist.split(",") if ":" in p]
-        if len(set(vals)) == 1 and len(vals) > 1:
-            missing.append("history flat — visi metai vienodi, reikia skirtingų metų duomenų")
     if not str(data.get("job_title", "")).strip():
         missing.append("job_title tuščias")
     # faq - jei mažiau nei 4, papildome
@@ -646,8 +655,15 @@ def clean_history(raw):
         m = re.match(r"(\d{4}):(.+)", part.strip())
         if m:
             n = parse_to_int(m.group(2))
-            if n > 0: entries.append(f"{m.group(1)}:{n}")
-    return ",".join(entries)
+            if n > 0: entries.append((int(m.group(1)), n))
+    if not entries: return ""
+    # Pašaliname dublikatus — jei reikšmė ta pati kaip ankstesnė, praleidžiame
+    cleaned = [entries[0]]
+    for year, val in entries[1:]:
+        if val != cleaned[-1][1]:
+            cleaned.append((year, val))
+    # Jei liko tik vienas unikalus taškas — grąžiname tik paskutinį
+    return ",".join(f"{y}:{v}" for y, v in cleaned)
 
 
 def fix_flat_history(history, net_worth_int):
@@ -691,9 +707,11 @@ def fix_flat_history(history, net_worth_int):
 
 
 def fix_history_last(history, net_worth_int):
-    """Paskutinė history reikšmė VISADA = net_worth"""
-    if not history or net_worth_int <= 0:
+    """Paskutinė history reikšmė VISADA = net_worth. Jei tuščia — tik 2026."""
+    if net_worth_int <= 0:
         return history
+    if not history:
+        return f"2026:{net_worth_int}"
     parts = history.split(",")
     last = parts[-1]
     if ":" in last:
@@ -944,11 +962,18 @@ def build_article_css():
 
 def build_faq_html(faq_items):
     if not faq_items: return ""
+    schema = json.dumps({
+        "@context": "https://schema.org", "@type": "FAQPage",
+        "mainEntity": [{"@type": "Question", "name": i["question"],
+                         "acceptedAnswer": {"@type": "Answer", "text": i["answer"]}}
+                        for i in faq_items]
+    }, ensure_ascii=False)
     items_html = "".join(
         f'<div class="pnw-faq-item"><div class="pnw-faq-q">{i["question"]}</div>'
         f'<div class="pnw-faq-a">{i["answer"]}</div></div>'
         for i in faq_items)
-    return f"""
+    return f"""<!-- rank-math-faq-block-off -->
+<script type="application/ld+json">{schema}</script>
 <div class="pnw-faq-wrap">
 <h2 class="pnw-faq-title">Frequently Asked Questions</h2>
 {items_html}
@@ -1269,7 +1294,12 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
     net_worth_int = int(net_worth) if net_worth.isdigit() else 0
     net_worth_int = validate_net_worth(name, net_worth_int)
     net_worth     = str(net_worth_int) if net_worth_int > 0 else net_worth
-    history       = clean_history(data.get("history", ""))
+    history = clean_history(data.get("history", ""))
+    # Jei history flat arba tuščia — naudojame tik 2026 reikšmę
+    if history:
+        vals = [p.split(":")[1] for p in history.split(",") if ":" in p]
+        if len(set(vals)) <= 1:
+            history = ""  # bus užpildyta fix_history_last su tik 2026
     job_title     = data.get("job_title", "").strip()
 
     print(f"    NW: {net_worth} | history: {history.count(',') + 1 if history else 0} entries | cats: {cats}")
@@ -1338,18 +1368,6 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
             "rank_math_title":         data.get("seo_title", f"{name} Net Worth 2026"),
             "rank_math_description":   seo_desc[:155],
             "rank_math_focus_keyword": f"{name} Net Worth 2026",
-            "rank_math_schema_data":   json.dumps({
-                "@context": "https://schema.org",
-                "@type": "FAQPage",
-                "mainEntity": [
-                    {
-                        "@type": "Question",
-                        "name": i["question"],
-                        "acceptedAnswer": {"@type": "Answer", "text": i["answer"]}
-                    }
-                    for i in faq_items
-                ]
-            }, ensure_ascii=False),
         }
     }
 
