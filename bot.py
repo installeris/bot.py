@@ -220,7 +220,10 @@ def call_gemini(prompt, gemini_url, retries=4):
         except Exception as e:
             print(f"    [3/4] {e}"); break
     return None
-    """Be google_search — naudoti kai duomenys jau gauti (pvz. straipsnio generavimui)."""
+
+
+def call_gemini_plain(prompt, gemini_url, retries=4):
+    """Be google_search — straipsnio generavimui kai duomenys jau gauti."""
     delay = 15
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
@@ -231,20 +234,20 @@ def call_gemini(prompt, gemini_url, retries=4):
     }
     for i in range(retries):
         try:
-            print(f"    [3/4] Gemini {i+1}/{retries}...")
+            print(f"    [3b/4] Gemini article {i+1}/{retries}...")
             t0 = time.time()
             r = requests.post(gemini_url, json=payload, timeout=GEMINI_TIMEOUT)
-            print(f"    [3/4] {r.status_code} ({round(time.time()-t0, 1)}s)")
+            print(f"    [3b/4] {r.status_code} ({round(time.time()-t0, 1)}s)")
             if r.status_code == 200:
                 return r.json()
             elif r.status_code in (429, 503):
                 time.sleep(delay); delay = min(delay * 2, 120)
             else:
-                print(f"    [3/4] Klaida: {r.text[:200]}"); break
+                print(f"    [3b/4] Klaida: {r.text[:200]}"); break
         except requests.exceptions.Timeout:
-            print(f"    [3/4] Timeout"); time.sleep(delay); delay = min(delay * 2, 120)
+            print(f"    [3b/4] Timeout"); time.sleep(delay); delay = min(delay * 2, 120)
         except Exception as e:
-            print(f"    [3/4] {e}"); break
+            print(f"    [3b/4] {e}"); break
     return None
 
 
