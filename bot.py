@@ -220,6 +220,32 @@ def call_gemini(prompt, gemini_url, retries=4):
         except Exception as e:
             print(f"    [3/4] {e}"); break
     return None
+    """Be google_search — naudoti kai duomenys jau gauti (pvz. straipsnio generavimui)."""
+    delay = 15
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.7, "maxOutputTokens": 32768},
+        "safetySettings": [{"category": c, "threshold": "BLOCK_NONE"} for c in
+            ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH",
+             "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]]
+    }
+    for i in range(retries):
+        try:
+            print(f"    [3/4] Gemini {i+1}/{retries}...")
+            t0 = time.time()
+            r = requests.post(gemini_url, json=payload, timeout=GEMINI_TIMEOUT)
+            print(f"    [3/4] {r.status_code} ({round(time.time()-t0, 1)}s)")
+            if r.status_code == 200:
+                return r.json()
+            elif r.status_code in (429, 503):
+                time.sleep(delay); delay = min(delay * 2, 120)
+            else:
+                print(f"    [3/4] Klaida: {r.text[:200]}"); break
+        except requests.exceptions.Timeout:
+            print(f"    [3/4] Timeout"); time.sleep(delay); delay = min(delay * 2, 120)
+        except Exception as e:
+            print(f"    [3/4] {e}"); break
+    return None
 
 
 # ─── JSON PARSING ─────────────────────────────────────────────────────────────
@@ -319,8 +345,20 @@ def extract_fields_by_regex(text):
     data = {}
     art = re.search(r'"article"\s*:\s*"(.*?)(?=",\s*"(?:net_worth|job_title))', text, re.DOTALL)
     if art: data["article"] = art.group(1).replace('\\"', '"')
-    nw = re.search(r'"net_worth"\s*:\s*"?(\d+)"?', text)
-    if nw: data["net_worth"] = int(nw.group(1))
+    nw = re.search(r'"net_worth"\s*:\s*"?([\d,\.]+(?:[BMK])?)"?', text, re.IGNORECASE)
+    if nw:
+        data["net_worth"] = parse_to_int(nw.group(1))
+    else:
+        # Bandome surasti skaičių aplink "net_worth" žodį tekste
+        nw2 = re.search(r'net.worth[^$\d]*\$?([\d,\.]+)\s*(?:million|billion)?', text, re.IGNORECASE)
+        if nw2:
+            val = nw2.group(1).replace(",", "")
+            if "billion" in text[nw2.start():nw2.start()+50].lower():
+                data["net_worth"] = int(float(val) * 1_000_000_000)
+            elif "million" in text[nw2.start():nw2.start()+50].lower():
+                data["net_worth"] = int(float(val) * 1_000_000)
+            else:
+                data["net_worth"] = int(float(val))
     jt = re.search(r'"job_title"\s*:\s*"([^"]{1,150})"', text)
     if jt: data["job_title"] = jt.group(1)
     hist = re.search(r'"history"\s*:\s*"([0-9:,]+)"', text)
@@ -519,8 +557,7 @@ def check_required_fields(data):
     """Tikrina ar visi būtini laukai užpildyti. Grąžina trūkstamų sąrašą."""
     missing = []
     article = data.get("article", "")
-    if not article or len(article) < 800:
-        missing.append(f"article per trumpas ({len(article)} chars, reikia 800+)")
+    # article generuojamas antrame call'e — netikrinamas čia
     nw = str(data.get("net_worth", "")).strip()
     if not nw or nw in ("0", "INT", ""):
         missing.append("net_worth tuščias")
@@ -930,9 +967,11 @@ def build_toc_html(article_html):
     toc_items = []
     for i, h2_text in enumerate(h2s):
         clean = _re.sub('<[^>]+>', '', h2_text).strip()
+        # Praleisti FAQ H2 - jis bus mūsų bloke
+        if _re.match(r'(?:frequently asked questions|faq)$', clean, _re.IGNORECASE):
+            continue
         anchor = f"toc-{i+1}-{_re.sub(r'[^a-z0-9]+', '-', clean.lower()).strip('-')[:40]}"
         toc_items.append(f'<li style="margin:0"><a href="#{anchor}" style="color:#2563eb;text-decoration:none">{clean}</a></li>')
-        # Pridedame id į H2 tagą
         new_html = new_html.replace(f'<h2>{h2_text}</h2>', f'<h2 id="{anchor}">{h2_text}</h2>', 1)
 
     toc = (
@@ -972,9 +1011,7 @@ def build_faq_html(faq_items):
         f'<div class="pnw-faq-item"><div class="pnw-faq-q">{i["question"]}</div>'
         f'<div class="pnw-faq-a">{i["answer"]}</div></div>'
         for i in faq_items)
-    return f"""<!-- rank-math-faq-block-off -->
-<script type="application/ld+json">{schema}</script>
-<div class="pnw-faq-wrap">
+    return f"""<div class="pnw-faq-wrap">
 <h2 class="pnw-faq-title">Frequently Asked Questions</h2>
 {items_html}
 </div>
@@ -984,7 +1021,8 @@ def build_faq_html(faq_items):
 .pnw-faq-item{{margin-bottom:14px;padding:16px 20px;background:#f8fafc;border-radius:10px;border-left:4px solid #10b981}}
 .pnw-faq-q{{font-weight:700;color:#0f172a;font-size:15px;margin-bottom:7px}}
 .pnw-faq-a{{color:#475569;font-size:14px;line-height:1.6}}
-</style>"""
+</style>
+<script type="application/ld+json">{schema}</script>"""
 
 
 def build_references_html(urls):
@@ -1245,7 +1283,7 @@ READABILITY TARGET: NYT/WSJ feature style — sophisticated but accessible.
 
 RETURN THIS EXACT JSON STRUCTURE — every field required:
 {{
-  "article": "<p>Hook...</p><h2>...</h2><p>...</p>... (full HTML, 1050-1250 words, minimum 5 H2 sections)",
+  "article": "",
   "net_worth": 7300000000,
   "job_title": "Current or most recent official title",
   "history": "2018:2500000000,2020:2800000000,2022:3000000000,2024:4200000000,2025:7300000000,2026:7300000000",
@@ -1281,6 +1319,76 @@ URLS RULES — CRITICAL:
 4. net_worth must be a plain integer (no quotes, no $ sign)
 5. All 11 fields are REQUIRED — missing any = failure. FAQ must have exactly 4 items.
 6. In the "article" field: NO HTML links or anchor tags. Use only: <p>, <h2>, <h3>, <strong>, <em>, <ul>, <li>. Links break the JSON parser."""
+
+
+def build_article_prompt(name, data):
+    """Antras prompt'as — tik straipsnio HTML generavimui, naudoja jau surinktus duomenis."""
+    net_worth     = data.get("net_worth", 0)
+    job_title     = data.get("job_title", "politician")
+    assets        = data.get("assets", "")
+    wealth_src    = ", ".join(data.get("wealth_sources", []))
+    faq_items     = data.get("faq", [])
+    faq_text      = "\n".join([f"Q: {f['question']}\nA: {f['answer']}" for f in faq_items])
+
+    h2_counts = [4, 4, 5, 5, 5, 6]
+    h2_count  = random.choice(h2_counts)
+    word_targets = {4: "900-1100", 5: "1100-1300", 6: "1300-1500"}
+    word_target  = word_targets[h2_count]
+
+    angles = [
+        f"Focus on the most CONTROVERSIAL or SURPRISING aspect of {name}'s wealth.",
+        f"Focus on how {name}'s wealth CHANGED dramatically — a big gain, loss, or unexpected turn.",
+        f"Focus on the CONTRAST between {name}'s public image and their actual financial reality.",
+        f"Focus on {name}'s BUSINESS DEALS and investments outside politics.",
+        f"Focus on {name}'s REAL ESTATE or major physical assets.",
+    ]
+    intro_styles = [
+        f"Open with a provocative question about {name}'s money. Answer it immediately.",
+        f"Open with the single most surprising number or fact — no buildup.",
+        f"Open by contrasting {name}'s public image with their actual wealth.",
+        f"Open with a specific year or deal that changed {name}'s financial life.",
+    ]
+    angle       = random.choice(angles)
+    intro_style = random.choice(intro_styles)
+
+    return f"""Write a {word_target}-word financial profile article about {name} in HTML format.
+
+FACTS TO USE (already researched — do not search again, just write):
+- Net worth: ${net_worth:,}
+- Job title: {job_title}
+- Main assets: {assets}
+- Wealth sources: {wealth_src}
+
+STRUCTURE: {intro_style} → {h2_count} H2 sections. ANGLE: {angle}
+
+H2 RULES:
+- Each H2 must be specific to {name} — include a dollar amount, asset name, year, or specific fact
+- {h2_count} H2 sections exactly — no more, no less
+
+WRITING STYLE — NYT/WSJ feature:
+- Mix sentence lengths naturally. Some run long and complex. Others stop cold.
+- Use em-dashes — like this — to extend a thought or add an aside
+- Rhetorical questions pull readers in. Use one every 400-500 words.
+- Contractions always: "he's", "didn't", "that's"
+- First name after first mention: "Nancy" not "Pelosi"
+- Active verbs: "bought", "built", "lost", "won"
+- No passive voice
+
+BANNED: "it's worth noting", "delve into", "moreover", "furthermore", "navigating",
+"landscape", "testament to", "lucrative", "multifaceted", "significant", "notably",
+"leveraged", "garnered", "accumulated wealth", "amassed", "robust portfolio",
+"in summary", "additionally", "over the years", "throughout his/her career"
+
+SEO:
+- First paragraph must contain "{name} net worth" naturally
+- Use "{name} net worth 2026" once in the body
+- Mention net worth figure at least 3 times
+- Compare to 1-2 other politicians with their net worth figures
+
+OUTPUT: Return ONLY the HTML article. Start with <p>, end with </p> or </ul>.
+Use ONLY: <p>, <h2>, <h3>, <strong>, <em>, <ul>, <li>
+NO JSON, NO markdown, NO explanations, NO links or anchor tags.
+CRITICAL: Do NOT write FAQ section. Do NOT write H2 questions like "How did X make money?" or "What is X's salary?" — those will be added separately. Stop the article before any Q&A section."""
 
 
 # ─── WORDPRESS ───────────────────────────────────────────────────────────────
@@ -1325,11 +1433,25 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
 
     article_html = data.get("article", "")
     article_html = article_html.replace('\\n', ' ').replace('\\r', '').strip()
-    # Jei Gemini įdėjo FAQ į article - išimame
-    if "pnw-faq" in article_html or "Frequently Asked Questions" in article_html:
-        import re as _re
-        article_html = _re.sub(r'<div[^>]*pnw-faq[^>]*>.*?</div>\s*', '', article_html, flags=_re.DOTALL)
-        article_html = _re.sub(r'<h2[^>]*>[^<]*FAQ[^<]*</h2>.*', '', article_html, flags=_re.DOTALL | _re.IGNORECASE)
+    import re as _re
+    # Pašaliname JSON-LD jei Gemini įdėjo
+    article_html = _re.sub(r'<script[^>]*application/ld\+json[^>]*>.*?</script>\s*', '', article_html, flags=_re.DOTALL | _re.IGNORECASE)
+    # Pašaliname FAQ sekciją pagal class
+    article_html = _re.sub(r'<div[^>]*pnw-faq[^>]*>.*?</div>\s*', '', article_html, flags=_re.DOTALL)
+    # Pašaliname <h2>FAQ</h2> arba <h2>Frequently Asked Questions</h2> ir VISKĄ PO JO
+    article_html = _re.sub(r'<h2[^>]*>\s*(?:Frequently Asked Questions|FAQ)\s*</h2>.*', '', article_html, flags=_re.DOTALL | _re.IGNORECASE)
+    # Pašaliname <h2 id="toc-N-faq..."> ir viską po jo
+    article_html = _re.sub(r'<h2[^>]*id=["\'][^"\']*faq[^"\']*["\'][^>]*>.*', '', article_html, flags=_re.DOTALL | _re.IGNORECASE)
+    # Pašaliname FAQ kaip <p><strong>Question?</strong>... Answer</p> paragrafus
+    # Jei paragrafas prasideda <strong> kuris baigiasi klausimu — tai FAQ
+    article_html = _re.sub(r'<p>\s*<strong>[^<]{10,}\?</strong>.*?</p>\s*', '', article_html, flags=_re.DOTALL)
+    # Pašaliname question-style H2 (How/What/Does/Is/Why/Where/When/Who)
+    article_html = _re.sub(
+        r'<h2[^>]*>\s*(?:How|What|Does|Is|Why|Where|When|Who)\s[^<]{10,}</h2>.*',
+        '', article_html, flags=_re.DOTALL | _re.IGNORECASE
+    )
+    # Pašaliname visus <style> tagus iš article
+    article_html = _re.sub(r'<style[^>]*>.*?</style>\s*', '', article_html, flags=_re.DOTALL | _re.IGNORECASE)
     article_with_ids, toc_html = build_toc_html(article_html)
 
     full_article = (
@@ -1435,6 +1557,9 @@ def run_bot(name, gemini_url):
                 if not toc_present:              missing_info.append("TOC")
                 if not sources_ok:               missing_info.append("sources")
                 if not title_has_hook:           missing_info.append("title_hook")
+                # Dvigubas FAQ — article viduje yra FAQ paragrafai
+                if faq_present and '<strong>' in art and '?</strong>' in art:
+                    missing_info.append("double_FAQ")
 
                 if missing_info:
                     print(f"  ID:{post_id} – trūksta: {', '.join(missing_info)} → ATNAUJINSIME")
@@ -1462,7 +1587,32 @@ def run_bot(name, gemini_url):
             print(f"    ↻ Pakartojame Gemini ({attempt+1}/3) — trūko laukų, bandome iš naujo...")
             time.sleep(10)
 
-        res = call_gemini(build_prompt(name), gemini_url)
+        # Jei 2+ bandymas ir žinome net worth — naudojame mini prompt
+        known_nw = KNOWN_NET_WORTHS.get(name)
+        if attempt >= 1 and known_nw:
+            mini_prompt = f"""Search for current information about {name} and return ONLY this JSON:
+{{
+  "article": "",
+  "net_worth": {known_nw},
+  "job_title": "search and fill",
+  "history": "2026:{known_nw}",
+  "wealth_sources": ["search and fill 2-3 items"],
+  "assets": "search and fill one sentence",
+  "cats": ["Most Searched Politicians"],
+  "urls": ["search and fill 2-3 real URLs from forbes.com opensecrets.org ballotpedia.org"],
+  "seo_title": "{name} Net Worth 2026: search and fill hook 55-65 chars",
+  "seo_desc": "search and fill 130-150 chars",
+  "faq": [
+    {{"question": "What is {name}'s net worth in 2026?", "answer": "search and fill"}},
+    {{"question": "How did {name} make their money?", "answer": "search and fill"}},
+    {{"question": "What is {name}'s salary?", "answer": "search and fill"}},
+    {{"question": "Is {name} getting richer or poorer?", "answer": "search and fill"}}
+  ]
+}}
+Start with {{ end with }} nothing else."""
+            res = call_gemini(mini_prompt, gemini_url)
+        else:
+            res = call_gemini(build_prompt(name), gemini_url)
         text, grounding_urls, err = extract_text_from_gemini(res)
 
         if err:
@@ -1494,6 +1644,25 @@ def run_bot(name, gemini_url):
         raw_urls = parsed.get("urls", [])
         raw_urls = [u for u in raw_urls if is_valid_source_url(u)]
         parsed["urls"] = verify_and_fix_sources(raw_urls, name=name)
+
+        # ── ANTRAS CALL: straipsnis generuojamas atskirai, BEZ google_search ──
+        print(f"    [3b/4] Gemini straipsnis...")
+        art_res = call_gemini_plain(build_article_prompt(name, parsed), gemini_url)
+        if art_res:
+            try:
+                parts = art_res.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+                clean_art = "".join(p.get("text", "") for p in parts).strip()
+                clean_art = re.sub(r'^```html\s*', '', clean_art)
+                clean_art = re.sub(r'```$', '', clean_art).strip()
+                if len(clean_art) > 500:
+                    parsed["article"] = clean_art
+                    print(f"    Straipsnis: {len(clean_art)} chars")
+                else:
+                    print(f"    ⚠ Straipsnis per trumpas ({len(clean_art)}), naudojame tuščią")
+            except Exception as e:
+                print(f"    ⚠ Straipsnis parse klaida: {e}")
+        else:
+            print(f"    ⚠ Straipsnis nepavyko, naudojame tuščią")
 
         # Visi laukai OK
         print(f"    ✓ Visi laukai užpildyti")
