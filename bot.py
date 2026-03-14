@@ -1357,10 +1357,17 @@ def build_article_prompt(name, data):
     return f"""Write a {word_target}-word financial profile article about {name} in HTML format.
 
 FACTS TO USE (already researched — do not search again, just write):
-- Net worth: ${net_worth:,}
-- Job title: {job_title}
+- Net worth: ${net_worth:,} (as of 2026)
+- Current status/role: {job_title}
 - Main assets: {assets}
 - Wealth sources: {wealth_src}
+
+⚠️ CRITICAL — CURRENT STATUS RULES:
+- Write about {name}'s CURRENT situation in 2026, not past roles
+- If {job_title} says "retired", "former", or lists a post-political role — write about THAT, not their old Senate/House salary
+- NEVER mention a government salary as current income if they have left office
+- If they are retired — focus on pension, investments, speaking fees, books, board seats
+- The year is 2026. Use present tense for current situation only.
 
 STRUCTURE: {intro_style} → {h2_count} H2 sections. ANGLE: {angle}
 
@@ -1405,12 +1412,7 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
     net_worth_int = int(net_worth) if net_worth.isdigit() else 0
     net_worth_int = validate_net_worth(name, net_worth_int)
     net_worth     = str(net_worth_int) if net_worth_int > 0 else net_worth
-    history = clean_history(data.get("history", ""))
-    # Jei history flat arba tuščia — naudojame tik 2026 reikšmę
-    if history:
-        vals = [p.split(":")[1] for p in history.split(",") if ":" in p]
-        if len(set(vals)) <= 1:
-            history = ""  # bus užpildyta fix_history_last su tik 2026
+    history = ""  # Visada tik 2026 — seni duomenys nepatikimi
     job_title     = data.get("job_title", "").strip()
 
     print(f"    NW: {net_worth} | history: {history.count(',') + 1 if history else 0} entries | cats: {cats}")
