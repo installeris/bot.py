@@ -1185,7 +1185,16 @@ Structure: opening hook ({intro_style.split(':')[0].replace('START WITH A ', '')
 
     return f"""You are a financial reporter writing for a general audience. Write a unique, well-researched profile of {name}'s finances.
 
-CRITICAL — NET WORTH ACCURACY:
+CRITICAL — CURRENT STATUS (March 2026):
+Search RIGHT NOW: "{name} 2026" and "{name} current role March 2026" and "{name} retired left office 2024 2025"
+The date today is March 2026. Political positions change constantly — elections, appointments, retirements happen every cycle.
+- Search what {name} is doing RIGHT NOW in 2026 before filling job_title
+- If they LEFT office in 2023/2024/2025 → "Former [title], now [current activity e.g. private investor / author / consultant]"  
+- If they LOST an election → "Former [title], lost reelection [year]"
+- If still IN office → their exact current title
+- Income sources MUST match 2026 reality — if retired: pension + investments + speaking, NOT old government salary
+
+
 1. Search RIGHT NOW in this exact order:
    a) "{name} net worth 2026"
    b) "{name} net worth 2025"
@@ -1288,7 +1297,7 @@ RETURN THIS EXACT JSON STRUCTURE — every field required:
 {{
   "article": "",
   "net_worth": 7300000000,
-  "job_title": "Current or most recent official title",
+  "job_title": "SEARCH '{name} current role 2026' first. Then write their ACTUAL March 2026 status. Examples: 'U.S. Senator (R-TX), incumbent' / 'Former U.S. Senator, retired 2025, now private investor' / 'Former Governor (2019-2023), now author and consultant'. NEVER assume they still hold old title.",
   "history": "2018:2500000000,2020:2800000000,2022:3000000000,2024:4200000000,2025:7300000000,2026:7300000000",
   "wealth_sources": ["Real Estate Holdings", "Book Deals & Royalties", "Stock Market Investments"],
   "assets": "One vivid specific sentence naming actual holdings with dollar values",
@@ -1362,12 +1371,13 @@ FACTS TO USE (already researched — do not search again, just write):
 - Main assets: {assets}
 - Wealth sources: {wealth_src}
 
-⚠️ CRITICAL — CURRENT STATUS RULES:
-- Write about {name}'s CURRENT situation in 2026, not past roles
-- If {job_title} says "retired", "former", or lists a post-political role — write about THAT, not their old Senate/House salary
-- NEVER mention a government salary as current income if they have left office
-- If they are retired — focus on pension, investments, speaking fees, books, board seats
-- The year is 2026. Use present tense for current situation only.
+⚠️ CRITICAL — WRITE ABOUT 2026 REALITY:
+- Current status: {job_title}
+- If "Former" or "retired" is in the status above — they have LEFT office. Write about what they do NOW.
+- NEVER write "Senator X earns $174,000 salary" if they are no longer a senator
+- NEVER use present tense for a role they no longer hold
+- Focus on: what are they doing in 2026? Pension? Investments? Speaking? Board seats? Consulting?
+- The reader wants to know about their CURRENT wealth, not their old government job
 
 STRUCTURE: {intro_style} → {h2_count} H2 sections. ANGLE: {angle}
 
@@ -1468,9 +1478,9 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
     )
 
     # 1-as postas po 1 valandos, kiekvienas kitas kas 5 valandas po jo
-    post_num     = stats["ok"] + stats["fail"] + stats["skip"]  # 0-based
-    delay_minutes = 60 + (300 * post_num)  # 1h + 5h * kiekvienas kitas
-    schedule_str = (datetime.now(timezone.utc) + timedelta(minutes=delay_minutes)).strftime("%Y-%m-%dT%H:%M:%S")
+    SCHEDULE_START = datetime(2026, 3, 16, 0, 0, 0, tzinfo=timezone.utc)
+    post_num       = stats["ok"] + stats["fail"] + stats["skip"]  # 0-based
+    schedule_str   = (SCHEDULE_START + timedelta(hours=4 * post_num)).strftime("%Y-%m-%dT%H:%M:%S")
     print(f"    Suplanuota: {schedule_str}")
 
     payload = {
