@@ -227,7 +227,7 @@ def call_gemini_plain(prompt, gemini_url, retries=4):
     delay = 15
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.7, "maxOutputTokens": 32768},
+        "generationConfig": {"temperature": 0.35, "maxOutputTokens": 32768},
         "safetySettings": [{"category": c, "threshold": "BLOCK_NONE"} for c in
             ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH",
              "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]]
@@ -1086,225 +1086,165 @@ def build_prompt(name):
     cats_list = ", ".join(CAT_MAP.keys())
     wealth_list = ", ".join(WEALTH_OPTIONS)
 
+    # KNOWN_NET_WORTHS — naudojame kaip prioritetinį šaltinį
+    known_nw = KNOWN_NET_WORTHS.get(name)
+    known_nw_str = (
+        f"PRIORITY SOURCE: Our verified data shows ${known_nw:,}. "
+        f"Use this unless you find a NEWER credible source from 2025-2026 that specifically updates this figure."
+    ) if known_nw else "Search for the most recent credible estimate from Forbes, Bloomberg, or OpenSecrets."
+
     # Dinamiški FAQ klausimai
     faq_pool_q1 = [
-        f'{{"question": "What is {name}\'s net worth in 2026?", "answer": "2-3 sentences. Specific figure with source and context."}}',
-        f'{{"question": "How rich is {name} compared to other politicians?", "answer": "2-3 sentences. Compare to peers with specific figures."}}',
-        f'{{"question": "Is {name} a millionaire?", "answer": "2-3 sentences. Specific net worth with context on how it was built."}}',
+        f'{{"question": "What is {name}\'s net worth in 2026?", "answer": "2-3 sentences with specific figure, source, and context."}}',
+        f'{{"question": "How rich is {name} compared to other politicians?", "answer": "2-3 sentences comparing to 2-3 peers with specific figures."}}',
+        f'{{"question": "Is {name} a millionaire?", "answer": "2-3 sentences with net worth and how it was built."}}',
     ]
     faq_pool_q2 = [
-        f'{{"question": "How did {name} make their money?", "answer": "2-3 sentences. Specific income sources with dollar amounts."}}',
-        f'{{"question": "What are {name}\'s main sources of income?", "answer": "2-3 sentences. Break down salary, investments, business income."}}',
-        f'{{"question": "Did {name} get rich before or after politics?", "answer": "2-3 sentences. Timeline of wealth with key turning points."}}',
+        f'{{"question": "How did {name} make their money?", "answer": "2-3 sentences covering specific income sources with dollar amounts."}}',
+        f'{{"question": "What are {name}\'s main sources of income?", "answer": "2-3 sentences breaking down salary, investments, business income."}}',
+        f'{{"question": "Did {name} get rich before or after politics?", "answer": "2-3 sentences with timeline and key turning points."}}',
     ]
     faq_pool_q3 = [
-        f'{{"question": "What is {name}\'s most valuable asset?", "answer": "2-3 sentences. Specific asset with estimated value."}}',
-        f'{{"question": "Does {name} own real estate?", "answer": "2-3 sentences. Specific properties with values if known."}}',
-        f'{{"question": "What does {name} invest in?", "answer": "2-3 sentences. Specific investments, stocks, or business holdings."}}',
+        f'{{"question": "What stocks does {name} own?", "answer": "2-3 sentences on specific holdings or disclosure data."}}',
+        f'{{"question": "Does {name} own real estate?", "answer": "2-3 sentences with specific properties and values if known."}}',
+        f'{{"question": "What does {name} invest in?", "answer": "2-3 sentences on specific investments, stocks, or business holdings."}}',
     ]
     faq_pool_q4 = [
-        f'{{"question": "How has {name}\'s wealth changed over time?", "answer": "2-3 sentences. Key turning points with numbers."}}',
-        f'{{"question": "Is {name} getting richer or poorer?", "answer": "2-3 sentences. Recent wealth trend with specific figures."}}',
-        f'{{"question": "What is {name}\'s salary?", "answer": "2-3 sentences. Official salary plus other income streams."}}',
+        f'{{"question": "Has {name} made any recent stock trades?", "answer": "2-3 sentences on recent transactions from disclosure forms."}}',
+        f'{{"question": "Is {name} getting richer or poorer?", "answer": "2-3 sentences on recent wealth trend with specific figures."}}',
+        f'{{"question": "What is {name}\'s annual salary?", "answer": "2-3 sentences covering official salary plus other income streams."}}',
     ]
     faq_q1 = random.choice(faq_pool_q1)
     faq_q2 = random.choice(faq_pool_q2)
     faq_q3 = random.choice(faq_pool_q3)
     faq_q4 = random.choice(faq_pool_q4)
 
-    # Dinamiški seo_desc kampai
     seo_angle_options = [
-        f"Write a completely unique meta description for {name} based on the most surprising or interesting financial fact you find. Include the actual net worth figure. 130-150 characters. No generic templates.",
-        f"Write a meta description that opens with {name}'s net worth figure, then adds one fact that would make someone click. 130-150 characters.",
-        f"Write a meta description as if teasing a magazine exposé about {name}'s money. Include the net worth. 130-150 characters. Make it compelling.",
-        f"Write a meta description that contrasts {name}'s public image with their actual wealth. Include the net worth figure. 130-150 characters.",
+        f"Write a meta description for {name} based on the most surprising financial fact. Include net worth. 130-150 chars. No generic templates.",
+        f"Open with {name}'s net worth figure, add one click-worthy fact. 130-150 chars.",
+        f"Tease the most surprising thing about {name}'s money. Include net worth. 130-150 chars.",
+        f"Contrast {name}'s public image with actual wealth. Include net worth figure. 130-150 chars.",
     ]
     seo_angle = random.choice(seo_angle_options)
 
-    angles = [
-        f"Focus on the most CONTROVERSIAL or SURPRISING aspect of {name}'s wealth.",
-        f"Focus on how {name}'s wealth CHANGED dramatically — a big gain, loss, or unexpected turn.",
-        f"Focus on the CONTRAST between {name}'s public image and their actual financial reality.",
-        f"Focus on {name}'s BUSINESS DEALS and investments outside politics — money most people overlook.",
-        f"Focus on how {name} BUILT wealth before entering politics — the foundation most don't know.",
-        f"Focus on {name}'s REAL ESTATE or major physical assets — make it tangible.",
-        f"Focus on how {name}'s net worth compares to political peers — shockingly high or surprisingly low?",
-    ]
-    angle = random.choice(angles)
-
-    # Intro stiliai
-    intro_styles = [
-        f"START WITH A QUESTION: Open with a provocative question about {name}'s money that most readers don't know the answer to. Then immediately answer it in the next sentence.",
-        f"START WITH A SHOCKING FACT: Open with the single most surprising number or fact about {name}'s finances — no buildup, just drop it in the first sentence.",
-        f"START WITH A CONTRAST: Open by contrasting {name}'s public image with their actual wealth. Make the reader feel the tension immediately.",
-        f"START WITH A SPECIFIC MOMENT: Open with a specific year, deal, or event that changed {name}'s financial life forever. Make it feel like the opening of a magazine story.",
-    ]
-    intro_style = random.choice(intro_styles)
-
-    # H2 skaičius
-    h2_counts = [4, 4, 5, 5, 5, 6]  # 5 dažniausiai, bet kartais 4 ar 6
+    h2_counts = [4, 4, 5, 5, 5, 6]
     h2_count = random.choice(h2_counts)
     word_targets = {4: "900-1100", 5: "1100-1300", 6: "1300-1500"}
     word_target = word_targets[h2_count]
 
-    structures = [
-        f"""ANGLE: {angle}
-INTRO STYLE: {intro_style}
-
-Create {h2_count} H2 headings that are SPECIFIC to {name} — based on actual facts you find about them.
-DO NOT use generic headings like "Income Streams Explained" or "The Number Behind X's Name".
-Each H2 must reference something REAL and SPECIFIC about {name}'s finances.
-
-Examples of GOOD specific H2s (these are just examples — create your own based on {name}'s actual story):
-- "How Mar-a-Lago Became Trump's Cash Machine" (specific property)
-- "The $65M Obama Book Deal That Changed Everything" (specific deal with amount)
-- "From $-1M Debt to $8M: Nikki Haley's Fastest Payday" (specific contrast)
-- "Why Sanders Owns 3 Houses on a Senator's Salary" (specific counterintuitive fact)
-- "The Setad Fund: Khamenei's $95B Shadow Empire" (specific organization)
-
-Structure: opening hook ({intro_style.split(':')[0].replace('START WITH A ', '').title()}) → {h2_count} unique H2 sections based on {name}'s real financial story""",
-
-        f"""ANGLE: {angle}
-INTRO STYLE: {intro_style}
-
-Write {h2_count} H2 headings that could ONLY apply to {name} — not to any other politician.
-Each heading must contain either: a specific dollar amount, a specific asset name, a specific year, or a specific surprising fact.
-
-Structure: opening hook ({intro_style.split(':')[0].replace('START WITH A ', '').title()}) → {h2_count} unique H2 sections. Each section must feel like it belongs in a magazine profile of {name} specifically.""",
-
-        f"""ANGLE: {angle}
-INTRO STYLE: {intro_style}
-
-Your {h2_count} H2 headings must be so specific that a reader instantly knows this article is about {name}.
-Use real names of properties, real dollar figures, real years, real events from {name}'s financial history.
-
-Structure: opening hook ({intro_style.split(':')[0].replace('START WITH A ', '').title()}) → {h2_count} unique H2 sections that tell {name}'s specific financial story from search results.""",
+    intro_styles = [
+        f"START WITH A QUESTION: Provocative question about {name}'s money most readers can't answer. Answer it immediately.",
+        f"START WITH A SHOCKING FACT: Drop the single most surprising number first sentence — no buildup.",
+        f"START WITH A CONTRAST: {name}'s public image vs actual wealth. Make the tension immediate.",
+        f"START WITH A SPECIFIC MOMENT: A year, deal, or event that changed {name}'s finances forever.",
     ]
-    structure = random.choice(structures)
+    intro_style = random.choice(intro_styles)
 
+    angles = [
+        f"The most CONTROVERSIAL or SURPRISING aspect of {name}'s wealth.",
+        f"How {name}'s wealth CHANGED dramatically — big gain, loss, or unexpected turn.",
+        f"The CONTRAST between {name}'s public image and actual financial reality.",
+        f"{name}'s INVESTMENT PORTFOLIO and stock trades — money most people overlook.",
+        f"{name}'s REAL ESTATE and physical assets — make it tangible.",
+        f"How {name}'s net worth compares to political peers.",
+    ]
+    angle = random.choice(angles)
 
-    return f"""You are a financial reporter writing for a general audience. Write a unique, well-researched profile of {name}'s finances.
+    return f"""You are an investigative financial journalist writing for politiciannetworth.com.
+Your role: authoritative, fact-based, SEO-optimized financial profiles of US politicians.
 
-CRITICAL — CURRENT STATUS (March 2026):
-Search RIGHT NOW: "{name} 2026" and "{name} current role March 2026" and "{name} retired left office 2024 2025"
-The date today is March 2026. Political positions change constantly — elections, appointments, retirements happen every cycle.
-- Search what {name} is doing RIGHT NOW in 2026 before filling job_title
-- If they LEFT office in 2023/2024/2025 → "Former [title], now [current activity e.g. private investor / author / consultant]"  
-- If they LOST an election → "Former [title], lost reelection [year]"
-- If still IN office → their exact current title
-- Income sources MUST match 2026 reality — if retired: pension + investments + speaking, NOT old government salary
+━━━ SUBJECT: {name} ━━━
 
+NET WORTH SOURCE PRIORITY (use in this order):
+1. {known_nw_str}
+2. OpenSecrets.org financial disclosures (most authoritative for official data)
+3. Congress stock trading disclosures (STOCK Act filings, 2024-2026)
+4. Forbes / Bloomberg wealth estimates
+5. CelebrityNetWorth (use only if nothing else available)
 
-1. Search RIGHT NOW in this exact order:
-   a) "{name} net worth 2026"
-   b) "{name} net worth 2025"
-   c) "{name} net worth site:forbes.com OR site:opensecrets.org OR site:celebritynetworth.com"
-2. ALWAYS use the MOST RECENT figure available — a 2025/2026 estimate beats a 2020 figure every time.
-3. If sources conflict, use the MOST RECENT credible source — NOT the lowest.
-   - OpenSecrets shows official disclosure data (often outdated/underreported)
-   - Forbes/CelebrityNetWorth estimate total wealth including unreported assets
-   - PREFER Forbes/CelebrityNetWorth for total net worth — they reflect current reality
-4. NEVER use old congressional disclosure figures as the final number if newer estimates exist.
-   - Example: Schumer's 2020 disclosure showed ~$900K but 2025 estimates put him at $6-7M
-   - Always search for the latest estimate, not just the official disclosure
-5. NEVER invent a figure. If genuinely no data exists, use the most recent credible estimate.
+⚠️ NO HALLUCINATION RULES:
+- If a disclosure shows a RANGE (e.g. $1M-$5M), use the midpoint or state the range — NEVER invent a specific figure
+- If you cite a number, you must have seen it in a source
+- net_worth in JSON must EXACTLY match the figure used throughout the article
+- If stock trades exist (Congress members), cite specific ticker symbols and dates from STOCK Act filings
+- If no data exists for a year → do not include that year in history
 
-5. "history" — ONLY CONFIRMED CITED FIGURES:
-   Run these searches now:
-   - "{name} net worth 2015 OR 2016 OR 2017 site:forbes.com OR site:opensecrets.org OR site:celebritynetworth.com"
-   - "{name} net worth 2018 OR 2019 OR 2020 site:forbes.com OR site:opensecrets.org OR site:celebritynetworth.com"
-   - "{name} net worth 2021 OR 2022 OR 2023 OR 2024 site:forbes.com OR site:opensecrets.org OR site:celebritynetworth.com"
+CURRENT STATUS — SEARCH FIRST (April 2026):
+Search: "{name} 2026" AND "{name} current role April 2026" AND "{name} retired OR left office 2024 2025"
+- Still in office → exact current title
+- Left office → "Former [title] (left [year]), now [current activity]"
+- Lost election → "Former [title], lost reelection [year]"
+- Income must reflect 2026 REALITY: if retired → pension + investments + speaking, NOT old salary
 
-   STRICT RULES — zero tolerance:
-   - ONLY include a year if a credible source cited a SPECIFIC number for that exact year
-   - Range = skip. "approximately $400M-$1B" → DO NOT include. Pick the most cited single figure or skip.
-   - Speculation = skip. "estimated to be around" without a source = DO NOT include
-   - Interpolation = skip. Do not calculate what net worth "must have been" between two data points
-   - 1 verified point beats 5 guesses — every time
-   - Net worth CAN decrease year to year — include as-is, do not smooth it out
-   - Last entry MUST equal net_worth exactly
-   - If NO historical data found → just: "2026:{{net_worth}}"
+NET WORTH RESEARCH — SEARCH IN THIS ORDER:
+a) "{name} net worth 2026"
+b) "{name} net worth 2025"
+c) "{name} OpenSecrets financial disclosure 2024"
+d) "{name} stock trades STOCK Act 2024 2025"
+e) "{name} net worth site:forbes.com OR site:bloomberg.com"
 
-WRITING RULES — READ EVERY LINE:
-- Article MUST be {word_target} words
-- Article MUST have exactly {h2_count} H2 sections (not more, not less)
-- ONLY verified real facts — no invented numbers
-- Use specific numbers: "$47,000 Senate salary" not "congressional salary"
-- Include 3+ facts most people genuinely don't know about this person's finances
-- Write like a New York Times or Wall Street Journal feature — not a blog post, not Wikipedia
+HISTORY — ZERO TOLERANCE FOR GUESSING:
+Only include a year if a credible source cited a SPECIFIC number for that exact year.
+- Range → skip or use midpoint clearly labeled as estimate
+- Speculation → skip
+- Interpolation → skip
+- If NO verified historical data → just: "2026:{{net_worth}}"
 
-SENTENCE & RHYTHM RULES:
-- Mix sentence lengths naturally — no pattern, no formula. Some sentences run long and complex, pulling the reader through a chain of thought. Others stop cold. Like this.
-- Use em-dashes to extend a thought — or add a parenthetical aside (the kind that feels like a whispered aside) — without breaking momentum
-- Rhetorical questions are your friend. Does anyone actually believe he earned that on a senator's salary?
-- Never stack two similar-length sentences back to back. Break the rhythm on purpose.
-- Paragraphs: 1-3 sentences. Vary it. A one-sentence paragraph can hit harder than three.
-- Use contractions naturally: "he's", "it's", "didn't", "wasn't", "that's"
-- Start sentences with "And", "But", "So", "Yet" when it feels right — it does
-- Transitions should feel earned, not mechanical. No "Furthermore." No "In addition." Just write the next thought.
+REQUIRED SECTIONS IN ARTICLE (leave "article" field empty — generated separately):
 
-VOCABULARY RULES:
-- Simple words win. "buy" not "purchase". "use" not "utilize". "start" not "commence".
-- Occasional informal phrases add texture: "turns out", "here's the thing", "not exactly pocket change"
-- Active voice always: "he bought", "she built", "they lost" — never passive constructions
-- Refer to the person by first name after first mention — "Nancy" not "Pelosi"
-- Specific beats vague: "$2.3 million condo in Brooklyn" not "real estate holdings"
-
-BANNED WORDS AND PHRASES — AUTOMATIC FAILURE if used:
-"it's worth noting", "delve into", "in conclusion", "moreover", "furthermore",
-"navigating", "landscape", "testament to", "shed light on", "pivotal role",
-"net worth journey", "financial journey", "in the world of", "underscores",
-"showcases", "lucrative", "multifaceted", "demonstrates", "significant",
-"notably", "it is important to note", "interestingly", "this allowed him/her to",
-"leveraged", "garnered", "accumulated wealth", "amassed", "robust portfolio",
-"in summary", "to summarize", "as a result", "in addition", "additionally",
-"has been", "have been", "it can be", "there are", "there is", "one of the",
-"plays a key role", "a wide range of", "over the years", "throughout his/her career",
-"it is clear", "needless to say", "at the end of the day", "when it comes to",
-"it goes without saying", "in terms of", "due to the fact that", "in order to"
+1. Quick Summary (2-3 sentences on primary wealth source)
+2. Career Earnings (official salary + political career timeline)
+3. Investment Portfolio (stocks, real estate, businesses — with specific values)
+4. Recent Trades (if Congress member: STOCK Act filings 2024-2026 with tickers)
+5. Key Takeaways (short paragraph, not a list)
 
 ARTICLE STRUCTURE:
-{structure}
+ANGLE: {angle}
+INTRO: {intro_style}
+{h2_count} H2 sections — each SPECIFIC to {name} with dollar amounts, asset names, years, or trades
+Target: {word_target} words
 
-TONE & STYLE:
-- Opening hook: ONE surprising number or contrast. Never start with name or "born in...".
-  Good: "$300 million. That's what most people think John Kerry is worth. They're wrong."
-  Bad: "John Kerry is an American politician who has accumulated significant wealth."
-- Every H2 section: open with a 1-sentence hook, then facts, then a kicker sentence that ends the section with punch
-- Last paragraph: end with something memorable — a contrast, a question, or a reality check
-- Read each paragraph aloud mentally. If it sounds robotic, rewrite it.
+SEO:
+- First paragraph: "{name} net worth" naturally
+- Use "{name} net worth 2026" once in body
+- Net worth figure mentioned 3+ times
+- H2s contain keyword variants: salary, assets, income, wealth, investments, trades
+- Compare to 2 peers with their net worth figures
+- Last section: Key Takeaways paragraph (boosts dwell time)
 
-SEO OPTIMIZATION RULES:
-- First paragraph MUST contain the exact phrase "{name} net worth" naturally
-- Use "{name} net worth 2026" once in the article body (not just in the title)
-- Each H2 heading: use a keyword variant naturally — "{name} salary", "{name} assets", "{name} income", "{name} wealth", "{name} investments"
-- Mention the net worth figure at least 3 times total in the article
-- Internal linking hint: mention at least 2 related politicians by name with their net worth figures (e.g. "Compare that to Bernie Sanders, whose net worth sits around $3 million.")
-- Last section before FAQ: include a "Key Takeaways" style summary as a short paragraph (not a list) — this boosts dwell time
+WRITING STYLE — NYT/WSJ investigative feature:
+- Short sentences for impact. Then medium. Long only for data explanation.
+- Em-dashes for asides — like this — use them
+- Contractions: "he's", "didn't", "that's"
+- First name after first mention
+- Active verbs: "bought", "built", "sold", "lost"
+- Rhetorical questions once every 400-500 words
+- Specific beats vague: "$2.3M Brooklyn condo" not "real estate holdings"
 
-FAQ RULES — ALL 4 ARE REQUIRED, no exceptions:
-- Questions must match exactly what people type into Google (check: "what is", "how did", "how much", "where does")
-- Each answer: 2-3 sentences MAX. Start with the direct answer. Add one supporting fact. End with context.
-- Use the exact net worth figure in FAQ answer #1
-- No filler phrases in answers — every word must add information
+BANNED (automatic failure):
+"it's worth noting", "delve into", "moreover", "furthermore", "navigating",
+"landscape", "testament to", "lucrative", "multifaceted", "significant",
+"notably", "leveraged", "garnered", "accumulated wealth", "amassed",
+"robust portfolio", "in summary", "additionally", "over the years",
+"throughout his/her career", "it is clear", "when it comes to",
+"in terms of", "due to the fact that", "in order to", "showcases",
+"underscores", "demonstrates", "plays a key role", "a wide range of"
 
-READABILITY TARGET: NYT/WSJ feature style — sophisticated but accessible.
-- Vary sentence length deliberately. Short punches. Then longer, more textured sentences that build context.
-- A high school student should understand every word. A finance editor should find it credible.
-- No robotic rhythm. Read it back. If it sounds like a template, rewrite it.
+HTML TABLES: If the politician has notable stock trades or asset breakdown,
+include ONE <table> with columns: Asset/Ticker | Value/Amount | Date/Source
 
-RETURN THIS EXACT JSON STRUCTURE — every field required:
+RETURN EXACT JSON — all 11 fields required:
 {{
   "article": "",
   "net_worth": 7300000000,
-  "job_title": "SEARCH '{name} current role 2026' first. Then write their ACTUAL March 2026 status. Examples: 'U.S. Senator (R-TX), incumbent' / 'Former U.S. Senator, retired 2025, now private investor' / 'Former Governor (2019-2023), now author and consultant'. NEVER assume they still hold old title.",
-  "history": "2018:2500000000,2020:2800000000,2022:3000000000,2024:4200000000,2025:7300000000,2026:7300000000",
+  "job_title": "SEARCH '{{name}} current role April 2026' first. Write ACTUAL 2026 status. E.g.: 'U.S. Senator (R-TX), incumbent' / 'Former Governor (2019-2023), now private investor'. NEVER assume old title.",
+  "history": "2026:{{net_worth}}",
   "wealth_sources": ["Real Estate Holdings", "Book Deals & Royalties", "Stock Market Investments"],
-  "assets": "One vivid specific sentence naming actual holdings with dollar values",
+  "assets": "One specific sentence naming actual holdings with dollar values — e.g. '$4.2M Georgetown home, $1.8M Vanguard index fund portfolio, $600K rental property in Austin'",
   "cats": ["Most Searched Politicians", "one category from list"],
-  "urls": ["https://forbes.com/...", "https://opensecrets.org/...", "https://example.com/..."],
-  "seo_title": "REQUIRED: '{name} Net Worth 2026: [unique hook]'. Hook = specific fact/contrast/figure from your research. Examples: 'From Debt to $8M', 'Middle-Class Joe\\'s $10M Secret', 'The $7B Truth Nobody Talks About'. FULL title must be 55-65 characters. Count every character including spaces. STOP at 65 — never cut mid-word. Better 58 chars than 67.",
-  "seo_desc": "130-150 char description — must include the net worth figure and one surprising fact",
+  "urls": ["https://opensecrets.org/...", "https://forbes.com/...", "https://example.com/..."],
+  "seo_title": "REQUIRED: '{name} Net Worth 2026: [specific hook]'. 55-65 chars. Hook = real fact/figure. Never cut mid-word.",
+  "seo_desc": "130-150 chars. Include net worth figure and one surprising fact. CTA tone.",
   "faq": [
     {faq_q1},
     {faq_q2},
@@ -1313,34 +1253,24 @@ RETURN THIS EXACT JSON STRUCTURE — every field required:
   ]
 }}
 
-CATEGORIES to choose from: {cats_list}
-WEALTH SOURCES to choose from (pick 2-4 that genuinely apply): {wealth_list}
+CATEGORIES: {cats_list}
+WEALTH SOURCES (pick 2-4 that genuinely apply): {wealth_list}
 SEO DESC ANGLE: {seo_angle}
 
-URLS RULES — CRITICAL:
-- "urls" must contain 3-4 REAL, WORKING URLs from credible sources you actually used
-- Use: forbes.com, bloomberg.com, opensecrets.org, ballotpedia.org, reuters.com, apnews.com, cnbc.com, businessinsider.com, thestreet.com, washingtonpost.com, nytimes.com, politico.com
-- DO NOT use vertexaisearch, google.com, youtube.com, twitter.com, facebook.com, instagram.com, wikipedia.org
-- If you cannot find exact article URLs, use the homepage of the source (e.g. "https://www.forbes.com/profile/donald-trump/")
-- NEVER leave urls as ["https://...", ...] — always put real URLs
+URLS: 3-4 REAL working URLs. Prefer opensecrets.org, congress.gov, forbes.com, ballotpedia.org.
+NO: vertexaisearch, google.com, youtube.com, twitter.com, facebook.com, wikipedia.org
 
-⚠️ OUTPUT RULES — CRITICAL:
-1. Start your response with {{ — nothing before it
-2. End with }} — nothing after it
-3. No markdown, no ```json, no explanations
-4. net_worth must be a plain integer (no quotes, no $ sign)
-5. All 11 fields are REQUIRED — missing any = failure. FAQ must have exactly 4 items.
-6. In the "article" field: NO HTML links or anchor tags. Use only: <p>, <h2>, <h3>, <strong>, <em>, <ul>, <li>. Links break the JSON parser."""
+⚠️ OUTPUT: Start with {{ nothing before. End with }} nothing after.
+No markdown. No ```json. net_worth = plain integer. All 11 fields required."""
 
 
 def build_article_prompt(name, data):
-    """Antras prompt'as — tik straipsnio HTML generavimui, naudoja jau surinktus duomenis."""
-    net_worth     = data.get("net_worth", 0)
-    job_title     = data.get("job_title", "politician")
-    assets        = data.get("assets", "")
-    wealth_src    = ", ".join(data.get("wealth_sources", []))
-    faq_items     = data.get("faq", [])
-    faq_text      = "\n".join([f"Q: {f['question']}\nA: {f['answer']}" for f in faq_items])
+    """Antras prompt'as — tik straipsnio HTML generavimui."""
+    net_worth   = data.get("net_worth", 0)
+    job_title   = data.get("job_title", "politician")
+    assets      = data.get("assets", "")
+    wealth_src  = ", ".join(data.get("wealth_sources", []))
+    faq_items   = data.get("faq", [])
 
     h2_counts = [4, 4, 5, 5, 5, 6]
     h2_count  = random.choice(h2_counts)
@@ -1348,67 +1278,80 @@ def build_article_prompt(name, data):
     word_target  = word_targets[h2_count]
 
     angles = [
-        f"Focus on the most CONTROVERSIAL or SURPRISING aspect of {name}'s wealth.",
-        f"Focus on how {name}'s wealth CHANGED dramatically — a big gain, loss, or unexpected turn.",
-        f"Focus on the CONTRAST between {name}'s public image and their actual financial reality.",
-        f"Focus on {name}'s BUSINESS DEALS and investments outside politics.",
-        f"Focus on {name}'s REAL ESTATE or major physical assets.",
+        f"The most CONTROVERSIAL or SURPRISING aspect of {name}'s wealth.",
+        f"How {name}'s wealth CHANGED dramatically.",
+        f"The CONTRAST between {name}'s public image and actual financial reality.",
+        f"{name}'s INVESTMENT PORTFOLIO and stock trades.",
+        f"{name}'s REAL ESTATE and physical assets.",
     ]
     intro_styles = [
         f"Open with a provocative question about {name}'s money. Answer it immediately.",
         f"Open with the single most surprising number or fact — no buildup.",
-        f"Open by contrasting {name}'s public image with their actual wealth.",
-        f"Open with a specific year or deal that changed {name}'s financial life.",
+        f"Open by contrasting {name}'s public image with actual wealth.",
+        f"Open with a specific year, deal, or stock trade that changed {name}'s financial life.",
     ]
     angle       = random.choice(angles)
     intro_style = random.choice(intro_styles)
 
-    return f"""Write a {word_target}-word financial profile article about {name} in HTML format.
+    # FAQ jako reference text
+    faq_ref = "\n".join([f"Q: {f['question']}\nA: {f['answer']}" for f in faq_items]) if faq_items else ""
 
-FACTS TO USE (already researched — do not search again, just write):
+    return f"""You are an investigative financial journalist. Write a {word_target}-word article about {name}'s finances in HTML format.
+
+VERIFIED DATA (use these exact figures — do NOT contradict them):
 - Net worth: ${net_worth:,} (as of 2026)
-- Current status/role: {job_title}
-- Main assets: {assets}
+- Current role: {job_title}
+- Key assets: {assets}
 - Wealth sources: {wealth_src}
 
-⚠️ CRITICAL — WRITE ABOUT 2026 REALITY:
-- Current status: {job_title}
-- If "Former" or "retired" is in the status above — they have LEFT office. Write about what they do NOW.
-- NEVER write "Senator X earns $174,000 salary" if they are no longer a senator
-- NEVER use present tense for a role they no longer hold
-- Focus on: what are they doing in 2026? Pension? Investments? Speaking? Board seats? Consulting?
-- The reader wants to know about their CURRENT wealth, not their old government job
+⚠️ 2026 REALITY CHECK:
+- Role is: {job_title}
+- If "Former" or "retired" → write about what they do NOW (pension, investments, speaking, board seats)
+- NEVER mention a salary from a role they no longer hold
+- Net worth figure in article MUST be ${net_worth:,} — no other figure
 
-STRUCTURE: {intro_style} → {h2_count} H2 sections. ANGLE: {angle}
+STRUCTURE: {intro_style} → {h2_count} H2 sections
+ANGLE: {angle}
+
+REQUIRED SECTIONS:
+1. Quick Summary (2-3 sentences, primary wealth source)
+2. Career Earnings (salary history, career timeline)
+3. Investment Portfolio (specific stocks, real estate, businesses with values)
+4. Recent Trades (if applicable: STOCK Act filings with tickers and dates)
+5. Key Takeaways (final paragraph — memorable contrast, question, or reality check)
 
 H2 RULES:
-- Each H2 must be specific to {name} — include a dollar amount, asset name, year, or specific fact
-- {h2_count} H2 sections exactly — no more, no less
+- Each H2 specific to {name}: dollar amount, asset name, year, or trade
+- Exactly {h2_count} H2 sections
+- NO H2 that asks FAQ-style questions (How did X make money? etc.)
 
-WRITING STYLE — NYT/WSJ feature:
-- Mix sentence lengths naturally. Some run long and complex. Others stop cold.
-- Use em-dashes — like this — to extend a thought or add an aside
-- Rhetorical questions pull readers in. Use one every 400-500 words.
-- Contractions always: "he's", "didn't", "that's"
-- First name after first mention: "Nancy" not "Pelosi"
-- Active verbs: "bought", "built", "lost", "won"
-- No passive voice
+HTML TABLE: If stock trades or asset data exists, include ONE <table>:
+<table><thead><tr><th>Asset/Ticker</th><th>Value</th><th>Date</th></tr></thead><tbody>...</tbody></table>
 
-BANNED: "it's worth noting", "delve into", "moreover", "furthermore", "navigating",
-"landscape", "testament to", "lucrative", "multifaceted", "significant", "notably",
+WRITING STYLE:
+- Short punchy sentences for impact. Medium ones for context. Long only for data.
+- Em-dashes — like this — for asides
+- Contractions: "he's", "didn't", "that's"
+- First name after first mention
+- Active verbs always
+- One rhetorical question per 400-500 words
+- Specific: "$2.3M Brooklyn condo" not "real estate holdings"
+
+BANNED: "it's worth noting", "delve", "moreover", "furthermore", "navigating",
+"landscape", "testament", "lucrative", "multifaceted", "significant", "notably",
 "leveraged", "garnered", "accumulated wealth", "amassed", "robust portfolio",
 "in summary", "additionally", "over the years", "throughout his/her career"
 
 SEO:
-- First paragraph must contain "{name} net worth" naturally
-- Use "{name} net worth 2026" once in the body
-- Mention net worth figure at least 3 times
-- Compare to 1-2 other politicians with their net worth figures
+- First paragraph: "{name} net worth" naturally
+- "{name} net worth 2026" once in body
+- Net worth mentioned 3+ times as ${net_worth:,}
+- Compare to 2 other politicians with their net worth figures
 
-OUTPUT: Return ONLY the HTML article. Start with <p>, end with </p> or </ul>.
-Use ONLY: <p>, <h2>, <h3>, <strong>, <em>, <ul>, <li>
-NO JSON, NO markdown, NO explanations, NO links or anchor tags.
-CRITICAL: Do NOT write FAQ section. Do NOT write H2 questions like "How did X make money?" or "What is X's salary?" — those will be added separately. Stop the article before any Q&A section."""
+OUTPUT: Return ONLY the HTML article body.
+Start with <p> or <h2>. End with </p> or </table>.
+Use ONLY: <p>, <h2>, <h3>, <strong>, <em>, <ul>, <li>, <table>, <thead>, <tbody>, <tr>, <th>, <td>
+NO links, NO anchor tags, NO JSON, NO markdown, NO FAQ section, NO explanations."""
 
 
 # ─── WORDPRESS ───────────────────────────────────────────────────────────────
@@ -1478,9 +1421,9 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
     )
 
     # 1-as postas po 1 valandos, kiekvienas kitas kas 5 valandas po jo
-    SCHEDULE_START = datetime(2026, 3, 19, 22, 11, 0, tzinfo=timezone.utc)
+    SCHEDULE_START = datetime(2026, 3, 16, 22, 11, 0, tzinfo=timezone.utc)
     post_num       = stats["ok"] + stats["fail"] + stats["skip"]  # 0-based
-    schedule_str   = (SCHEDULE_START + timedelta(hours=8 * post_num)).strftime("%Y-%m-%dT%H:%M:%S")
+    schedule_str   = (SCHEDULE_START + timedelta(hours=4 * post_num)).strftime("%Y-%m-%dT%H:%M:%S")
     print(f"    Suplanuota: {schedule_str}")
 
     payload = {
