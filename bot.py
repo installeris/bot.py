@@ -1421,7 +1421,7 @@ def post_to_wp(name, data, img_id, img_url_val, post_id=None):
     )
 
     # 1-as postas po 1 valandos, kiekvienas kitas kas 5 valandas po jo
-    SCHEDULE_START = datetime(2026, 3, 16, 22, 11, 0, tzinfo=timezone.utc)
+    SCHEDULE_START = datetime(2026, 4, 23, 15, 11, 0, tzinfo=timezone.utc)
     post_num       = stats["ok"] + stats["fail"] + stats["skip"]  # 0-based
     schedule_str   = (SCHEDULE_START + timedelta(hours=4 * post_num)).strftime("%Y-%m-%dT%H:%M:%S")
     print(f"    Suplanuota: {schedule_str}")
